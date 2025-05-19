@@ -32,14 +32,8 @@ jobs:
           pip install --no-cache-dir hatch
       - name: Patch tools dependency sdk-python and test
         run: |
-          echo $GITHUB_WORKSPACE
-          pwd
-          ls
           cd tools
-          # sed -i 's|.*strands-agents>.*|"strands-agents @ file://${GITHUB_WORKSPACE}/sdk-python/",|' pyproject.toml
           sed -i "s|.*strands-agents>.*|\"strands-agents @ file://${GITHUB_WORKSPACE}/sdk-python/\",|" pyproject.toml
-
-          cat pyproject.toml
           count=$(grep -c "strands-agents @ file://${GITHUB_WORKSPACE}/sdk-python" pyproject.toml)
           if [ "$count" -eq 2 ]; then
             echo "Dependency found exactly twice in pyproject.toml"
