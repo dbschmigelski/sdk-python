@@ -32,6 +32,8 @@ jobs:
           pip install --no-cache-dir hatch
       - name: Patch tools dependency sdk-python and test
         run: |
+          pwd
+          ls
           cd tools
           # sed -i 's|"strands-agents>|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python",|' pyproject.toml
           sed -i 's|.*strands-agents>.*|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python/",|' pyproject.toml
