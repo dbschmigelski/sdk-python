@@ -11,7 +11,7 @@ from .agent_result import AgentResult
 from .conversation_manager import ConversationManager, NullConversationManager, SlidingWindowConversationManager
 
 __all__ = [
-    "Agent",
+    # "Agent", <--- Remove agent from root to verify failure in strands-agents-tools
     "AgentResult",
     "ConversationManager",
     "NullConversationManager",
