@@ -33,6 +33,6 @@ jobs:
       - name: Patch tools dependency sdk-python and test
         run: |
           cd tools
-          sed -i 's|strands-agents,|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python",|' pyproject.toml
+          sed -i 's|strands-agents>|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python",|' pyproject.toml
           cat pyproject.toml
           hatch run test
