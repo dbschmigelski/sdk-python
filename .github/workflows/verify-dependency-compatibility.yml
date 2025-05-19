@@ -30,11 +30,9 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --no-cache-dir hatch
-      - name: Patch tools dependency sdk-python
+      - name: Patch tools dependency sdk-python and test
         run: |
           cd tools
           sed -i 's|strands-agents,|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python",|' pyproject.toml
-      - name: Install Tools repository dependencies
-        run: |
-          cd tools
+          cat pyproject.toml
           hatch run test
