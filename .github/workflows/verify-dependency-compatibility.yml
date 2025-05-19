@@ -33,6 +33,15 @@ jobs:
       - name: Patch tools dependency sdk-python and test
         run: |
           cd tools
-          sed -i 's|"strands-agents>|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python",|' pyproject.toml
+          # sed -i 's|"strands-agents>|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python",|' pyproject.toml
+          sed -i 's/.*strands-agents>.*/"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python/",' pyproject.toml
           cat pyproject.toml
-          hatch run test
+          count=$(grep -c "strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python" pyproject.toml)
+          if [ "$count" -eq 2 ]; then
+            echo "Dependency found exactly twice in pyproject.toml"
+          else
+            echo "Dependency found $count times, expected 2"
+            exit 1
+          fi
+      - name: Run test
+        run: hatch run test
