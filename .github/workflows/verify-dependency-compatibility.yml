@@ -32,6 +32,7 @@ jobs:
           pip install --no-cache-dir hatch
       - name: Patch tools dependency sdk-python and test
         run: |
+          echo $GITHUB_WORKSPACE
           pwd
           ls
           cd tools
