@@ -1,0 +1,40 @@
+name: Test Dependency Compatibility
+ 
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+ 
+jobs:
+  test-dependency:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+ 
+    steps:
+      - name: Checkout sdk-python
+        uses: actions/checkout@v4
+        with:
+          path: sdk-python
+      - name: Checkout Tools Repository
+        uses: actions/checkout@v4
+        with:
+          repository: strands-agents/tools
+          path: tools
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          pip install --no-cache-dir hatch
+      - name: Patch tools dependency sdk-python
+        run: |
+          cd tools
+          sed -i 's|strands-agents,|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python",|' pyproject.toml
+      - name: Install Tools repository dependencies
+        run: |
+          cd tools
+          hatch run test
