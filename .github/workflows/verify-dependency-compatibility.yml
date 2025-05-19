@@ -34,7 +34,7 @@ jobs:
         run: |
           cd tools
           # sed -i 's|"strands-agents>|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python",|' pyproject.toml
-          sed -i 's/.*strands-agents>.*/"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python/",' pyproject.toml
+          sed -i 's|.*strands-agents>.*|"strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python/",|' pyproject.toml
           cat pyproject.toml
           count=$(grep -c "strands-agents @ file:///home/runner/work/strands-agents/strands-agents/sdk-python" pyproject.toml)
           if [ "$count" -eq 2 ]; then
