@@ -59,6 +59,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Configure Credentials 
+        uses: aws-actions/configure-aws-credentials@v4
+        with: 
+          role-to-assume: arn:aws:iam::224477382724:role/StrandsGitHubWorkflowBedrockInvokeRole
+          aws-region: us-east-1
       - name: Install dependencies
         run: |
           pip install --no-cache-dir hatch
