@@ -48,6 +48,37 @@ def get_platform_args(base_args):
     """Convert base uvx args to platform-specific format"""
     return base_args
 
+def get_windows_executable_command(command: str) -> str:
+    """
+    Get the correct executable command normalized for Windows.
+
+    On Windows, commands might exist with specific extensions (.exe, .cmd, etc.)
+    that need to be located for proper execution.
+
+    Args:
+        command: Base command (e.g., 'uvx', 'npx')
+
+    Returns:
+        str: Windows-appropriate command path
+    """
+    try:
+        # First check if command exists in PATH as-is
+        if command_path := shutil.which(command):
+            return command_path
+
+        # Check for Windows-specific extensions
+        for ext in [".cmd", ".bat", ".exe", ".ps1"]:
+            ext_version = f"{command}{ext}"
+            if ext_path := shutil.which(ext_version):
+                return ext_path
+
+        # For regular commands or if we couldn't find special versions
+        return command
+    except OSError:
+        # Handle file system errors during path resolution
+        # (permissions, broken symlinks, etc.)
+        return command
+
 def test_mcp_client():
     """
     Test should yield output similar to the following
@@ -61,6 +92,7 @@ def test_mcp_client():
 
    
     print("STARTING STDIO")
+    print(f"WINDOWS {get_windows_executable_command("uvx")})
     logger.info("STARTING STDIO_STDIO")
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(
