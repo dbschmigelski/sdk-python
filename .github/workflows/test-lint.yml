@@ -65,8 +65,18 @@ jobs:
         with: 
           role-to-assume: arn:aws:iam::224477382724:role/StrandsGitHubWorkflowBedrockInvokeRole
           aws-region: us-east-1
+      - name: Set LLM Provider Env Vars
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            LLAMA_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:llamaapi-testing-key
+            OPENAI_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:openai-testing-key
+            ANTHROPIC_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:anthropic-testing-key
       - name: Install dependencies
         run: |
+          echo $LLAMA_API_KEY
+          echo $OPENAI_API_KEY
+          echo $ANTHROPIC_API_KEY
           pip install --no-cache-dir hatch
       - name: Run Unit tests
         id: tests
