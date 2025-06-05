@@ -44,5 +44,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install --no-cache-dir hatch
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
       - name: Run MCP Integ
         run: hatch run test-integ-mcp
