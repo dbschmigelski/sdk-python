@@ -5,7 +5,7 @@ on:
     branches: [ main ]
     types: [opened, synchronize, reopened, ready_for_review, review_requested, review_request_removed]
   push:
-    branches: [ main ]  # Also run on direct pushes to main
+    branches: [ main, dea/integ-test ]  # Also run on direct pushes to main
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
