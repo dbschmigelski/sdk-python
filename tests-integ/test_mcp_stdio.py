@@ -42,6 +42,12 @@ def start_calculator_server(transport: Literal["sse", "streamable-http"], port=i
 
     mcp.run(transport=transport)
 
+def get_platform_args(base_args):
+    """Convert base uvx args to platform-specific format"""
+    if platform.system() == "Windows":
+        package_name = base_args[0].split("@")[0]
+        return ["--from"] + base_args + [f"{package_name}.exe"]
+    return base_args
 
 def test_mcp_client():
     """
@@ -54,16 +60,13 @@ def test_mcp_client():
     {'role': 'assistant', 'content': [{'text': '\n\nThe result of adding 1 and 2 is 3.'}]}
     """  # noqa: E501
 
+   
     print("STARTING STDIO")
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(
             StdioServerParameters(
                 command="uvx",
-                args=[
-                    "--from",
-                    "awslabs.aws-documentation-mcp-server@latest",
-                    "awslabs.aws-documentation-mcp-server.exe",
-                ],
+                args=get_platform_args(["awslabs.aws-documentation-mcp-server@latest"])
             )
         )
     )
