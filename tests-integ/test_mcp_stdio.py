@@ -46,9 +46,6 @@ def start_calculator_server(transport: Literal["sse", "streamable-http"], port=i
 
 def get_platform_args(base_args):
     """Convert base uvx args to platform-specific format"""
-    if False and platform.system() == "Windows":
-        package_name = base_args[0].split("@")[0]
-        return ["--from"] + base_args + [f"{package_name}.exe"]
     return base_args
 
 def test_mcp_client():
