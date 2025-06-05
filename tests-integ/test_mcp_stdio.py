@@ -1,3 +1,4 @@
+import logging
 import threading
 from typing import List, Literal
 
@@ -8,6 +9,9 @@ from strands.tools.mcp.mcp_client import MCPClient
 from strands.tools.mcp.mcp_types import MCPTransport
 from strands.types.content import Message
 from strands.types.tools import ToolUse
+
+
+logging.getLogger("strands").setLevel(logging.DEBUG)
 
 
 def start_calculator_server(transport: Literal["sse", "streamable-http"], port=int):

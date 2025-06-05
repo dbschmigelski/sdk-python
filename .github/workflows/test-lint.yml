@@ -27,7 +27,7 @@ jobs:
         - os: macos-latest
           os-name: 'macOS'
           python-version: "3.13"
-      fail-fast: true
+      fail-fast: false
     runs-on: ${{ matrix.os }}
     env:
       LOG_LEVEL: DEBUG
