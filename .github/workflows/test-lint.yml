@@ -69,9 +69,9 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
-            LLAMA_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:llamaapi-testing-key
-            OPENAI_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:openai-testing-key
-            ANTHROPIC_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:anthropic-testing-key
+            LLAMA_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:llamaapi-testing-key-TaDL5A
+            OPENAI_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:openai-testing-key-9zoeWL
+            ANTHROPIC_API_KEY, arn:aws:secretsmanager:us-east-1:224477382724:secret:anthropic-testing-key-ICk4sH
       - name: Install dependencies
         run: |
           echo $LLAMA_API_KEY
