@@ -165,6 +165,9 @@ test = [
 test-integ = [
     "hatch test tests-integ {args}"
 ]
+test-integ-mcp = [
+    "hatch test tests-integ/test_mcp_stdio.py"
+]
 
 
 [tool.mypy]

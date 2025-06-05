@@ -82,6 +82,8 @@ jobs:
         id: tests
         run: hatch test tests --cover
         continue-on-error: false
+      - name: Run MCP Integ
+        run: hatch run test-integ-mcp
   lint:
     name: Lint
     runs-on: ubuntu-latest
