@@ -50,6 +50,7 @@ def test_mcp_client():
     {'role': 'assistant', 'content': [{'text': '\n\nThe result of adding 1 and 2 is 3.'}]}
     """  # noqa: E501
 
+    print("STARTING STDIO")
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="python", args=["tests-integ/echo_server.py"]))
     )
