@@ -52,7 +52,16 @@ def test_mcp_client():
 
     print("STARTING STDIO")
     stdio_mcp_client = MCPClient(
-        lambda: stdio_client(StdioServerParameters(command="uvx", args=["awslabs.aws-documentation-mcp-server@latest"]))
+        lambda: stdio_client(
+            StdioServerParameters(
+                command="uvx",
+                args=[
+                    "--from",
+                    "awslabs.aws-documentation-mcp-server@latest",
+                    "awslabs.aws-documentation-mcp-server.exe",
+                ],
+            )
+        )
     )
     with stdio_mcp_client:
         agent = Agent(tools=stdio_mcp_client.list_tools_sync())
