@@ -15,6 +15,7 @@ jobs:
     name: Build distribution 📦
     permissions:
       contents: read
+      id-token: write
     needs:
       - call-test-lint
     runs-on: ubuntu-latest
