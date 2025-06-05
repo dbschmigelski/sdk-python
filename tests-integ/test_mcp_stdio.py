@@ -13,6 +13,7 @@ from strands.types.tools import ToolUse
 
 
 logging.getLogger("strands").setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 
 def start_calculator_server(transport: Literal["sse", "streamable-http"], port=int):
@@ -63,6 +64,7 @@ def test_mcp_client():
 
    
     print("STARTING STDIO")
+    logger.info("STARTING STDIO_STDIO")
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(
             StdioServerParameters(
@@ -73,4 +75,5 @@ def test_mcp_client():
     )
     with stdio_mcp_client:
         agent = Agent(tools=stdio_mcp_client.list_tools_sync())
+        logger.debug(f"Tools {agent.tool_names}")
     print("DONE")
