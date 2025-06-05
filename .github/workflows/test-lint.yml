@@ -12,6 +12,7 @@ jobs:
     name: Unit Tests - Python ${{ matrix.python-version }} - ${{ matrix.os-name }}
     permissions:
       contents: read
+      id-token: write
     strategy:
       matrix:
        include:
