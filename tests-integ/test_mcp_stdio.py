@@ -77,3 +77,4 @@ def test_mcp_client():
         agent = Agent(tools=stdio_mcp_client.list_tools_sync())
         logger.debug(f"Tools {agent.tool_names}")
     print("DONE")
+    assert 1 == 2
