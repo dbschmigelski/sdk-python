@@ -15,5 +15,6 @@ jobs:
     uses: ./.github/workflows/test-lint.yml
     permissions:
       contents: read
+      id-token: write
     with:
       ref: ${{ github.event.pull_request.head.sha }}
