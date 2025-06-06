@@ -19,13 +19,19 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            const pr = context.payload.pull_request;
+            const isOwner = pr.user.type === 'User' && pr.user.login === context.repo.owner;
+            const labels = pr.labels.map(label => label.name);
+            const hasLabel = labels.includes('approved-for-integ-test')
             if (!(hasLabel || isOwner)) {
+              core.setFailed('Pull Request must either have label approved-for-integ-test or be created by an owner')
+            }
       - name: Configure Credentials 
         uses: aws-actions/configure-aws-credentials@v4
         with: 
          role-to-assume: ${{ secrets.STRANDS_INTEG_TEST_ROLE }}
          aws-region: us-east-1
-      - name: Set LLM Provider Env VarsMore actions
+      - name: Set LLM Provider Env Vars
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
