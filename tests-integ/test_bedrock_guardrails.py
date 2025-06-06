@@ -12,7 +12,7 @@ BLOCKED_OUTPUT = "BLOCKED_OUTPUT"
 
 @pytest.fixture(scope="module")
 def boto_session():
-    return boto3.Session(region_name="us-west-2")
+    return boto3.Session(region_name="us-east-1")
 
 
 @pytest.fixture(scope="module")
