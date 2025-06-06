@@ -6,7 +6,7 @@
   </div>
 
   <h1>
-    Strands Agents--------
+    Strands Agents---------
   </h1>
 
   <h2>
