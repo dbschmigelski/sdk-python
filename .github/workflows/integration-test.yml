@@ -3,9 +3,6 @@ name: Secure Integration test
 on:
   pull_request_target:
     types: [opened, synchronize, labeled, unlabled, reopened]
-
-env:
-  AWS_REGION: us-east-1
   
 jobs:
   check-access-and-checkout:
@@ -63,8 +60,11 @@ jobs:
         run: |
           pip install --no-cache-dir hatch
       - name: Run integration tests
+        env:
+          AWS_REGION: us-east-1
         id: tests
         run: |
+          echo "region $AWS_REGION"
           hatch test tests-integ
       
     
