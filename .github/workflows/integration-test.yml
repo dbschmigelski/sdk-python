@@ -3,9 +3,7 @@ name: Secure Integration test
 on:
   pull_request_target:
     types: [opened, synchronize, labeled, unlabled, reopened]
-  push:
-    branches:
-      - dea/integ-test
+
 jobs:
   check-access-and-checkout:
     runs-on: ubuntu-latest
