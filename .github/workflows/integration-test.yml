@@ -43,11 +43,6 @@ jobs:
          role-to-assume: ${{ secrets.STRANDS_INTEG_TEST_ROLE }}
          aws-region: us-east-1
          mask-aws-account-id: true
-      - name: Set LLM Provider Env Vars
-        uses: aws-actions/aws-secretsmanager-get-secrets@v2
-        with:
-          secret-ids: |
-            OPENAI_API_KEY, ${{ secrets.STRANDS_OPENAI_API_KEY_SECRET }}
       - name: Checkout base branch
         uses: actions/checkout@v4
         with:
