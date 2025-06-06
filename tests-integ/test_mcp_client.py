@@ -103,13 +103,13 @@ def test_can_reuse_mcp_client():
 
 def test_streamable_http_mcp_client():
     server_thread = threading.Thread(
-        target=start_calculator_server, kwargs={"transport": "streamable-http", "port": 8001}, daemon=True
+        target=start_calculator_server, kwargs={"transport": "streamable-http", "port": 8004}, daemon=True
     )
     server_thread.start()
     time.sleep(8)  # wait for server to startup completely
 
     def transport_callback() -> MCPTransport:
-        return streamablehttp_client(url="http://127.0.0.1:8001/mcp")
+        return streamablehttp_client(url="http://127.0.0.1:8004/mcp")
 
     streamable_http_client = MCPClient(transport_callback)
     with streamable_http_client:
