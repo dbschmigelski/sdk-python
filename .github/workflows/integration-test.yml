@@ -54,9 +54,9 @@ jobs:
       - name: Run integration tests
         env:
           AWS_REGION: us-east-1
+          AWS_REGION_NAME: us-east-1 # Needed for LiteLLM
         id: tests
         run: |
-          echo "region $AWS_REGION"
           hatch test tests-integ
       
     
