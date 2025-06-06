@@ -47,9 +47,7 @@ jobs:
         uses: aws-actions/aws-secretsmanager-get-secrets@v2
         with:
           secret-ids: |
-            LLAMA_API_KEY, ${{ secrets.STRANDS_LLAMAAPI_API_KEY_SECRET }}
             OPENAI_API_KEY, ${{ secrets.STRANDS_OPENAI_API_KEY_SECRET }}
-            ANTHROPIC_API_KEY, ${{ secrets.STRANDS_ANTHROPIC_API_KEY_SECRET }}
       - name: Checkout base branch
         uses: actions/checkout@v4
         with:
