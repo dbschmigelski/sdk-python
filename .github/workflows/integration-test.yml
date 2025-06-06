@@ -18,12 +18,22 @@ jobs:
         with:
           script: |
             const pr = context.payload.pull_request;
-            const isOwner = pr.user.type === 'User' && pr.user.login === context.repo.owner;
+            
             const labels = pr.labels.map(label => label.name);
             const hasLabel = labels.includes('approved-for-integ-test')
-            if (!(hasLabel || isOwner)) {
-              core.setFailed('Pull Request must either have label approved-for-integ-test or be created by an owner')
+            if (hasLabel) {
+              core.info('PR contains label approved-for-integ-test')
+              return
             }
+            
+            const isOwner = pr.user.type === 'User' && pr.user.login === context.repo.owner;
+            if (isOwner) {
+              core.info('PR auther is an OWNER')
+              return
+            }
+
+            core.setFailed('Pull Request must either have label approved-for-integ-test or be created by an owner')
+
       - name: Configure Credentials 
         uses: aws-actions/configure-aws-credentials@v4
         with: 
