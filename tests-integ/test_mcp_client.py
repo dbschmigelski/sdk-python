@@ -106,7 +106,7 @@ def test_streamable_http_mcp_client():
         target=start_calculator_server, kwargs={"transport": "streamable-http", "port": 8001}, daemon=True
     )
     server_thread.start()
-    time.sleep(2)  # wait for server to startup completely
+    time.sleep(8)  # wait for server to startup completely
 
     def transport_callback() -> MCPTransport:
         return streamablehttp_client(url="http://127.0.0.1:8001/mcp")
