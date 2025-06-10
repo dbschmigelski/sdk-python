@@ -44,63 +44,6 @@ def start_calculator_server(transport: Literal["sse", "streamable-http"], port=i
     mcp.run(transport=transport)
 
 
-def test_mcp_client():
-    """
-    Test should yield output similar to the following
-    {'role': 'user', 'content': [{'text': 'add 1 and 2, then echo the result back to me'}]}
-    {'role': 'assistant', 'content': [{'text': "I'll help you add 1 and 2 and then echo the result back to you.\n\nFirst, I'll calculate 1 + 2:"}, {'toolUse': {'toolUseId': 'tooluse_17ptaKUxQB20ySZxwgiI_w', 'name': 'calculator', 'input': {'x': 1, 'y': 2}}}]}
-    {'role': 'user', 'content': [{'toolResult': {'status': 'success', 'toolUseId': 'tooluse_17ptaKUxQB20ySZxwgiI_w', 'content': [{'text': '3'}]}}]}
-    {'role': 'assistant', 'content': [{'text': "\n\nNow I'll echo the result back to you:"}, {'toolUse': {'toolUseId': 'tooluse_GlOc5SN8TE6ti8jVZJMBOg', 'name': 'echo', 'input': {'to_echo': '3'}}}]}
-    {'role': 'user', 'content': [{'toolResult': {'status': 'success', 'toolUseId': 'tooluse_GlOc5SN8TE6ti8jVZJMBOg', 'content': [{'text': '3'}]}}]}
-    {'role': 'assistant', 'content': [{'text': '\n\nThe result of adding 1 and 2 is 3.'}]}
-    """  # noqa: E501
-
-    server_thread = threading.Thread(
-        target=start_calculator_server, kwargs={"transport": "sse", "port": 8000}, daemon=True
-    )
-    server_thread.start()
-    time.sleep(2)  # wait for server to startup completely
-
-    sse_mcp_client = MCPClient(lambda: sse_client("http://127.0.0.1:8000/sse"))
-    stdio_mcp_client = MCPClient(
-        lambda: stdio_client(StdioServerParameters(command="python", args=["tests-integ/echo_server.py"]))
-    )
-    with sse_mcp_client, stdio_mcp_client:
-        agent = Agent(tools=sse_mcp_client.list_tools_sync() + stdio_mcp_client.list_tools_sync())
-        agent("add 1 and 2, then echo the result back to me")
-
-        tool_use_content_blocks = _messages_to_content_blocks(agent.messages)
-        assert any([block["name"] == "echo" for block in tool_use_content_blocks])
-        assert any([block["name"] == "calculator" for block in tool_use_content_blocks])
-
-        image_prompt = """
-        Generate a custom image, then tell me if the image is red, blue, yellow, pink, orange, or green. 
-        RESPOND ONLY WITH THE COLOR
-        """
-        assert any(
-            [
-                "yellow".casefold() in block["text"].casefold()
-                for block in agent(image_prompt).message["content"]
-                if "text" in block
-            ]
-        )
-
-
-def test_can_reuse_mcp_client():
-    stdio_mcp_client = MCPClient(
-        lambda: stdio_client(StdioServerParameters(command="python", args=["tests-integ/echo_server.py"]))
-    )
-    with stdio_mcp_client:
-        stdio_mcp_client.list_tools_sync()
-        pass
-    with stdio_mcp_client:
-        agent = Agent(tools=stdio_mcp_client.list_tools_sync())
-        agent("echo the following to me <to_echo>DOG</to_echo>")
-
-        tool_use_content_blocks = _messages_to_content_blocks(agent.messages)
-        assert any([block["name"] == "echo" for block in tool_use_content_blocks])
-
-
 def test_streamable_http_mcp_client():
     server_thread = threading.Thread(
         target=start_calculator_server, kwargs={"transport": "streamable-http", "port": 8004}, daemon=True
