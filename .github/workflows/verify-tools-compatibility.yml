@@ -38,7 +38,6 @@ jobs:
       - name: Patch tools dependency on sdk-python and test
         run: |
           cd tools
-          
           sed -i "s|.*strands-agents>.*|\"strands-agents @ file://${GITHUB_WORKSPACE}/sdk-python/\",|" pyproject.toml
          
           count=$(grep -c "strands-agents @ file://${GITHUB_WORKSPACE}/sdk-python" pyproject.toml)
