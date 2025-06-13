@@ -36,7 +36,7 @@ Strands Agents is a simple yet powerful SDK that takes a model-driven approach t
 
 ## Feature Overvieww
 
-- **Lightweight & Flexible**: Simple agent loop that just works and is fully customizablen
+- **Lightweight & Flexible**: Simple agent loop that just works and is fully customizablenn
 - **Model Agnostic**: Support for Amazon Bedrock, Anthropic, LiteLLM, Llama, Ollama, OpenAI, and custom providers
 - **Advanced Capabilities**: Multi-agent systems, autonomous agents, and streaming support
 - **Built-in MCP**: Native support for Model Context Protocol (MCP) servers, enabling access to thousands of pre-built tools
