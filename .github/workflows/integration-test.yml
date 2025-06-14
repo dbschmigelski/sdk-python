@@ -1,12 +1,17 @@
 name: Secure Integration test
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, labeled, unlabled, reopened]
+  workflow_run:
+    workflows: [ "Test and Lint" ]
+    types:
+      - completed
   
 jobs:
   check-access-and-checkout:
     runs-on: ubuntu-latest
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
     permissions:
       id-token: write
       pull-requests: read
