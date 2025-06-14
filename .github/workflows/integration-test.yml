@@ -2,7 +2,7 @@ name: Secure Integration test
 
 on:
   workflow_run:
-    workflows: [ "Test and Lint" ]
+    workflows: [ "Pull Request and Push Action" ]
     types:
       - completed
   
