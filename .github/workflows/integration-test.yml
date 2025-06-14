@@ -9,9 +9,7 @@ on:
 jobs:
   check-access-and-checkout:
     runs-on: ubuntu-latest
-    if: >
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     permissions:
       id-token: write
       pull-requests: read
