@@ -18,6 +18,7 @@ from strands.agent.state import AgentState
 from strands.handlers.callback_handler import PrintingCallbackHandler, null_callback_handler
 from strands.models.bedrock import DEFAULT_BEDROCK_MODEL_ID, BedrockModel
 from strands.session.repository_session_manager import RepositorySessionManager
+from strands.telemetry.tracer import serialize
 from strands.types.content import Messages
 from strands.types.exceptions import ContextWindowOverflowException, EventLoopException
 from strands.types.session import Session, SessionAgent, SessionMessage, SessionType
@@ -229,6 +230,37 @@ def test_agent__init__with_string_model_id():
 
     assert isinstance(agent.model, BedrockModel)
     assert agent.model.config["model_id"] == "nonsense"
+
+
+def test_agent__init__nested_tools_flattening(tool_decorated, tool_module, tool_imported, tool_registry):
+    _ = tool_registry
+    # Nested structure: [tool_decorated, [tool_module, [tool_imported]]]
+    agent = Agent(tools=[tool_decorated, [tool_module, [tool_imported]]])
+    tru_tool_names = sorted(agent.tool_names)
+    exp_tool_names = ["tool_decorated", "tool_imported", "tool_module"]
+    assert tru_tool_names == exp_tool_names
+
+
+def test_agent__init__deeply_nested_tools(tool_decorated, tool_module, tool_imported, tool_registry):
+    _ = tool_registry
+    # Deeply nested structure
+    nested_tools = [[[[tool_decorated]], [[tool_module]], tool_imported]]
+    agent = Agent(tools=nested_tools)
+    tru_tool_names = sorted(agent.tool_names)
+    exp_tool_names = ["tool_decorated", "tool_imported", "tool_module"]
+    assert tru_tool_names == exp_tool_names
+
+
+@pytest.mark.parametrize(
+    "agent_id",
+    [
+        "a/../b",
+        "a/b",
+    ],
+)
+def test_agent__init__invalid_id(agent_id):
+    with pytest.raises(ValueError, match=f"agent_id={agent_id} | id cannot contain path separators"):
+        Agent(agent_id=agent_id)
 
 
 def test_agent__call__(
@@ -961,20 +993,69 @@ def test_agent_callback_handler_custom_handler_used():
 
 
 def test_agent_structured_output(agent, system_prompt, user, agenerator):
+    # Setup mock tracer and span
+    mock_strands_tracer = unittest.mock.MagicMock()
+    mock_otel_tracer = unittest.mock.MagicMock()
+    mock_span = unittest.mock.MagicMock()
+    mock_strands_tracer.tracer = mock_otel_tracer
+    mock_otel_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+    agent.tracer = mock_strands_tracer
+
     agent.model.structured_output = unittest.mock.Mock(return_value=agenerator([{"output": user}]))
 
     prompt = "Jane Doe is 30 years old and her email is jane@doe.com"
+
+    # Store initial message count
+    initial_message_count = len(agent.messages)
 
     tru_result = agent.structured_output(type(user), prompt)
     exp_result = user
     assert tru_result == exp_result
 
+    # Verify conversation history is not polluted
+    assert len(agent.messages) == initial_message_count
+
+    # Verify the model was called with temporary messages array
     agent.model.structured_output.assert_called_once_with(
         type(user), [{"role": "user", "content": [{"text": prompt}]}], system_prompt=system_prompt
     )
 
+    mock_span.set_attributes.assert_called_once_with(
+        {
+            "gen_ai.system": "strands-agents",
+            "gen_ai.agent.name": "Strands Agents",
+            "gen_ai.agent.id": "default",
+            "gen_ai.operation.name": "execute_structured_output",
+        }
+    )
+
+    # ensure correct otel event messages are emitted
+    act_event_names = mock_span.add_event.call_args_list
+    exp_event_names = [
+        unittest.mock.call(
+            "gen_ai.system.message", attributes={"role": "system", "content": serialize([{"text": system_prompt}])}
+        ),
+        unittest.mock.call(
+            "gen_ai.user.message",
+            attributes={
+                "role": "user",
+                "content": '[{"text": "Jane Doe is 30 years old and her email is jane@doe.com"}]',
+            },
+        ),
+        unittest.mock.call("gen_ai.choice", attributes={"message": json.dumps(user.model_dump())}),
+    ]
+
+    assert act_event_names == exp_event_names
+
 
 def test_agent_structured_output_multi_modal_input(agent, system_prompt, user, agenerator):
+    # Setup mock tracer and span
+    mock_strands_tracer = unittest.mock.MagicMock()
+    mock_otel_tracer = unittest.mock.MagicMock()
+    mock_span = unittest.mock.MagicMock()
+    mock_strands_tracer.tracer = mock_otel_tracer
+    mock_otel_tracer.start_as_current_span.return_value.__enter__.return_value = mock_span
+    agent.tracer = mock_strands_tracer
     agent.model.structured_output = unittest.mock.Mock(return_value=agenerator([{"output": user}]))
 
     prompt = [
@@ -989,12 +1070,24 @@ def test_agent_structured_output_multi_modal_input(agent, system_prompt, user, a
         },
     ]
 
+    # Store initial message count
+    initial_message_count = len(agent.messages)
+
     tru_result = agent.structured_output(type(user), prompt)
     exp_result = user
     assert tru_result == exp_result
 
+    # Verify conversation history is not polluted
+    assert len(agent.messages) == initial_message_count
+
+    # Verify the model was called with temporary messages array
     agent.model.structured_output.assert_called_once_with(
         type(user), [{"role": "user", "content": prompt}], system_prompt=system_prompt
+    )
+
+    mock_span.add_event.assert_called_with(
+        "gen_ai.choice",
+        attributes={"message": json.dumps(user.model_dump())},
     )
 
 
@@ -1004,9 +1097,40 @@ async def test_agent_structured_output_in_async_context(agent, user, agenerator)
 
     prompt = "Jane Doe is 30 years old and her email is jane@doe.com"
 
+    # Store initial message count
+    initial_message_count = len(agent.messages)
+
     tru_result = await agent.structured_output_async(type(user), prompt)
     exp_result = user
     assert tru_result == exp_result
+
+    # Verify conversation history is not polluted
+    assert len(agent.messages) == initial_message_count
+
+
+def test_agent_structured_output_without_prompt(agent, system_prompt, user, agenerator):
+    """Test that structured_output works with existing conversation history and no new prompt."""
+    agent.model.structured_output = unittest.mock.Mock(return_value=agenerator([{"output": user}]))
+
+    # Add some existing messages to the agent
+    existing_messages = [
+        {"role": "user", "content": [{"text": "Jane Doe is 30 years old"}]},
+        {"role": "assistant", "content": [{"text": "I understand."}]},
+    ]
+    agent.messages.extend(existing_messages)
+
+    initial_message_count = len(agent.messages)
+
+    tru_result = agent.structured_output(type(user))  # No prompt provided
+    exp_result = user
+    assert tru_result == exp_result
+
+    # Verify conversation history is unchanged
+    assert len(agent.messages) == initial_message_count
+    assert agent.messages == existing_messages
+
+    # Verify the model was called with existing messages only
+    agent.model.structured_output.assert_called_once_with(type(user), existing_messages, system_prompt=system_prompt)
 
 
 @pytest.mark.asyncio
@@ -1015,10 +1139,17 @@ async def test_agent_structured_output_async(agent, system_prompt, user, agenera
 
     prompt = "Jane Doe is 30 years old and her email is jane@doe.com"
 
+    # Store initial message count
+    initial_message_count = len(agent.messages)
+
     tru_result = agent.structured_output(type(user), prompt)
     exp_result = user
     assert tru_result == exp_result
 
+    # Verify conversation history is not polluted
+    assert len(agent.messages) == initial_message_count
+
+    # Verify the model was called with temporary messages array
     agent.model.structured_output.assert_called_once_with(
         type(user), [{"role": "user", "content": [{"text": prompt}]}], system_prompt=system_prompt
     )
@@ -1616,99 +1747,7 @@ def test_agent_tool_non_serializable_parameter_filtering(agent, mock_randint):
     tool_call_text = user_message["content"][1]["text"]
     assert "agent.tool.tool_decorated direct tool call." in tool_call_text
     assert '"random_string": "test_value"' in tool_call_text
-    assert '"non_serializable_agent": "<<non-serializable: Agent>>"' in tool_call_text
-
-
-def test_agent_tool_multiple_non_serializable_types(agent, mock_randint):
-    """Test filtering of various non-serializable object types."""
-    mock_randint.return_value = 123
-
-    # Create various non-serializable objects
-    class CustomClass:
-        def __init__(self, value):
-            self.value = value
-
-    non_serializable_objects = {
-        "agent": Agent(),
-        "custom_object": CustomClass("test"),
-        "function": lambda x: x,
-        "set_object": {1, 2, 3},
-        "complex_number": 3 + 4j,
-        "serializable_string": "this_should_remain",
-        "serializable_number": 42,
-        "serializable_list": [1, 2, 3],
-        "serializable_dict": {"key": "value"},
-    }
-
-    # This should not crash
-    result = agent.tool.tool_decorated(random_string="test_filtering", **non_serializable_objects)
-
-    # Verify tool executed successfully
-    expected_result = {
-        "content": [{"text": "test_filtering"}],
-        "status": "success",
-        "toolUseId": "tooluse_tool_decorated_123",
-    }
-    assert result == expected_result
-
-    # Check the recorded message for proper parameter filtering
-    assert len(agent.messages) > 0
-    user_message = agent.messages[0]
-    tool_call_text = user_message["content"][0]["text"]
-
-    # Verify serializable objects remain unchanged
-    assert '"serializable_string": "this_should_remain"' in tool_call_text
-    assert '"serializable_number": 42' in tool_call_text
-    assert '"serializable_list": [1, 2, 3]' in tool_call_text
-    assert '"serializable_dict": {"key": "value"}' in tool_call_text
-
-    # Verify non-serializable objects are replaced with descriptive strings
-    assert '"agent": "<<non-serializable: Agent>>"' in tool_call_text
-    assert (
-        '"custom_object": "<<non-serializable: test_agent_tool_multiple_non_serializable_types.<locals>.CustomClass>>"'
-        in tool_call_text
-    )
-    assert '"function": "<<non-serializable: function>>"' in tool_call_text
-    assert '"set_object": "<<non-serializable: set>>"' in tool_call_text
-    assert '"complex_number": "<<non-serializable: complex>>"' in tool_call_text
-
-
-def test_agent_tool_serialization_edge_cases(agent, mock_randint):
-    """Test edge cases in parameter serialization filtering."""
-    mock_randint.return_value = 999
-
-    # Test with None values, empty containers, and nested structures
-    edge_case_params = {
-        "none_value": None,
-        "empty_list": [],
-        "empty_dict": {},
-        "nested_list_with_non_serializable": [1, 2, Agent()],  # This should be filtered out
-        "nested_dict_serializable": {"nested": {"key": "value"}},  # This should remain
-    }
-
-    result = agent.tool.tool_decorated(random_string="edge_cases", **edge_case_params)
-
-    # Verify successful execution
-    expected_result = {
-        "content": [{"text": "edge_cases"}],
-        "status": "success",
-        "toolUseId": "tooluse_tool_decorated_999",
-    }
-    assert result == expected_result
-
-    # Check parameter filtering in recorded message
-    assert len(agent.messages) > 0
-    user_message = agent.messages[0]
-    tool_call_text = user_message["content"][0]["text"]
-
-    # Verify serializable values remain
-    assert '"none_value": null' in tool_call_text
-    assert '"empty_list": []' in tool_call_text
-    assert '"empty_dict": {}' in tool_call_text
-    assert '"nested_dict_serializable": {"nested": {"key": "value"}}' in tool_call_text
-
-    # Verify non-serializable nested structure is replaced
-    assert '"nested_list_with_non_serializable": [1, 2, "<<non-serializable: Agent>>"]' in tool_call_text
+    assert '"non_serializable_agent": "<<non-serializable: Agent>>"' not in tool_call_text
 
 
 def test_agent_tool_no_non_serializable_parameters(agent, mock_randint):
@@ -1760,3 +1799,36 @@ def test_agent_tool_record_direct_tool_call_disabled_with_non_serializable(agent
 
     # Verify no messages were recorded
     assert len(agent.messages) == 0
+
+
+def test_agent_tool_call_parameter_filtering_integration(mock_randint):
+    """Test that tool calls properly filter parameters in message recording."""
+    mock_randint.return_value = 42
+
+    @strands.tool
+    def test_tool(action: str) -> str:
+        """Test tool with single parameter."""
+        return action
+
+    agent = Agent(tools=[test_tool])
+
+    # Call tool with extra non-spec parameters
+    result = agent.tool.test_tool(
+        action="test_value",
+        agent=agent,  # Should be filtered out
+        extra_param="filtered",  # Should be filtered out
+    )
+
+    # Verify tool executed successfully
+    assert result["status"] == "success"
+    assert result["content"] == [{"text": "test_value"}]
+
+    # Check that only spec parameters are recorded in message history
+    assert len(agent.messages) > 0
+    user_message = agent.messages[0]
+    tool_call_text = user_message["content"][0]["text"]
+
+    # Should only contain the 'action' parameter
+    assert '"action": "test_value"' in tool_call_text
+    assert '"agent"' not in tool_call_text
+    assert '"extra_param"' not in tool_call_text

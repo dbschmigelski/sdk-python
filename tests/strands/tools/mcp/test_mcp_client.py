@@ -4,10 +4,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from mcp import ListToolsResult
 from mcp.types import CallToolResult as MCPCallToolResult
+from mcp.types import GetPromptResult, ListPromptsResult, Prompt, PromptMessage
 from mcp.types import TextContent as MCPTextContent
 from mcp.types import Tool as MCPTool
 
 from strands.tools.mcp import MCPClient
+from strands.tools.mcp.mcp_types import MCPToolResult
 from strands.types.exceptions import MCPClientInitializationError
 
 
@@ -129,6 +131,8 @@ def test_call_tool_sync_status(mock_transport, mock_session, is_error, expected_
         assert result["toolUseId"] == "test-123"
         assert len(result["content"]) == 1
         assert result["content"][0]["text"] == "Test message"
+        # No structured content should be present when not provided by MCP
+        assert result.get("structuredContent") is None
 
 
 def test_call_tool_sync_session_not_active():
@@ -137,6 +141,31 @@ def test_call_tool_sync_session_not_active():
 
     with pytest.raises(MCPClientInitializationError, match="client.session is not running"):
         client.call_tool_sync(tool_use_id="test-123", name="test_tool", arguments={"param": "value"})
+
+
+def test_call_tool_sync_with_structured_content(mock_transport, mock_session):
+    """Test that call_tool_sync correctly handles structured content."""
+    mock_content = MCPTextContent(type="text", text="Test message")
+    structured_content = {"result": 42, "status": "completed"}
+    mock_session.call_tool.return_value = MCPCallToolResult(
+        isError=False, content=[mock_content], structuredContent=structured_content
+    )
+
+    with MCPClient(mock_transport["transport_callable"]) as client:
+        result = client.call_tool_sync(tool_use_id="test-123", name="test_tool", arguments={"param": "value"})
+
+        mock_session.call_tool.assert_called_once_with("test_tool", {"param": "value"}, None)
+
+        assert result["status"] == "success"
+        assert result["toolUseId"] == "test-123"
+        # Content should only contain the text content, not the structured content
+        assert len(result["content"]) == 1
+        assert result["content"][0]["text"] == "Test message"
+        # Structured content should be in its own field
+        assert "structuredContent" in result
+        assert result["structuredContent"] == structured_content
+        assert result["structuredContent"]["result"] == 42
+        assert result["structuredContent"]["status"] == "completed"
 
 
 def test_call_tool_sync_exception(mock_transport, mock_session):
@@ -312,6 +341,45 @@ def test_enter_with_initialization_exception(mock_transport):
         client.start()
 
 
+def test_mcp_tool_result_type():
+    """Test that MCPToolResult extends ToolResult correctly."""
+    # Test basic ToolResult functionality
+    result = MCPToolResult(status="success", toolUseId="test-123", content=[{"text": "Test message"}])
+
+    assert result["status"] == "success"
+    assert result["toolUseId"] == "test-123"
+    assert result["content"][0]["text"] == "Test message"
+
+    # Test that structuredContent is optional
+    assert "structuredContent" not in result or result.get("structuredContent") is None
+
+    # Test with structuredContent
+    result_with_structured = MCPToolResult(
+        status="success", toolUseId="test-456", content=[{"text": "Test message"}], structuredContent={"key": "value"}
+    )
+
+    assert result_with_structured["structuredContent"] == {"key": "value"}
+
+
+def test_call_tool_sync_without_structured_content(mock_transport, mock_session):
+    """Test that call_tool_sync works correctly when no structured content is provided."""
+    mock_content = MCPTextContent(type="text", text="Test message")
+    mock_session.call_tool.return_value = MCPCallToolResult(
+        isError=False,
+        content=[mock_content],  # No structuredContent
+    )
+
+    with MCPClient(mock_transport["transport_callable"]) as client:
+        result = client.call_tool_sync(tool_use_id="test-123", name="test_tool", arguments={"param": "value"})
+
+        assert result["status"] == "success"
+        assert result["toolUseId"] == "test-123"
+        assert len(result["content"]) == 1
+        assert result["content"][0]["text"] == "Test message"
+        # structuredContent should be None when not provided by MCP
+        assert result.get("structuredContent") is None
+
+
 def test_exception_when_future_not_running():
     """Test exception handling when the future is not running."""
     # Create a client.with a mock transport
@@ -337,3 +405,64 @@ def test_exception_when_future_not_running():
 
         # Verify that set_exception was not called since the future was not running
         mock_future.set_exception.assert_not_called()
+
+
+# Prompt Tests - Sync Methods
+
+
+def test_list_prompts_sync(mock_transport, mock_session):
+    """Test that list_prompts_sync correctly retrieves prompts."""
+    mock_prompt = Prompt(name="test_prompt", description="A test prompt", id="prompt_1")
+    mock_session.list_prompts.return_value = ListPromptsResult(prompts=[mock_prompt])
+
+    with MCPClient(mock_transport["transport_callable"]) as client:
+        result = client.list_prompts_sync()
+
+        mock_session.list_prompts.assert_called_once_with(cursor=None)
+        assert len(result.prompts) == 1
+        assert result.prompts[0].name == "test_prompt"
+        assert result.nextCursor is None
+
+
+def test_list_prompts_sync_with_pagination_token(mock_transport, mock_session):
+    """Test that list_prompts_sync correctly passes pagination token and returns next cursor."""
+    mock_prompt = Prompt(name="test_prompt", description="A test prompt", id="prompt_1")
+    mock_session.list_prompts.return_value = ListPromptsResult(prompts=[mock_prompt], nextCursor="next_page_token")
+
+    with MCPClient(mock_transport["transport_callable"]) as client:
+        result = client.list_prompts_sync(pagination_token="current_page_token")
+
+        mock_session.list_prompts.assert_called_once_with(cursor="current_page_token")
+        assert len(result.prompts) == 1
+        assert result.prompts[0].name == "test_prompt"
+        assert result.nextCursor == "next_page_token"
+
+
+def test_list_prompts_sync_session_not_active():
+    """Test that list_prompts_sync raises an error when session is not active."""
+    client = MCPClient(MagicMock())
+
+    with pytest.raises(MCPClientInitializationError, match="client session is not running"):
+        client.list_prompts_sync()
+
+
+def test_get_prompt_sync(mock_transport, mock_session):
+    """Test that get_prompt_sync correctly retrieves a prompt."""
+    mock_message = PromptMessage(role="user", content=MCPTextContent(type="text", text="This is a test prompt"))
+    mock_session.get_prompt.return_value = GetPromptResult(messages=[mock_message])
+
+    with MCPClient(mock_transport["transport_callable"]) as client:
+        result = client.get_prompt_sync("test_prompt_id", {"key": "value"})
+
+        mock_session.get_prompt.assert_called_once_with("test_prompt_id", arguments={"key": "value"})
+        assert len(result.messages) == 1
+        assert result.messages[0].role == "user"
+        assert result.messages[0].content.text == "This is a test prompt"
+
+
+def test_get_prompt_sync_session_not_active():
+    """Test that get_prompt_sync raises an error when session is not active."""
+    client = MCPClient(MagicMock())
+
+    with pytest.raises(MCPClientInitializationError, match="client session is not running"):
+        client.get_prompt_sync("test_prompt_id", {})
