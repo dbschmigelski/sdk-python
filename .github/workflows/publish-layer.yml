@@ -46,8 +46,8 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: <aws-region>
+          role-to-assume: ${{ secrets.STRANDS_INTEG_TEST_ROLE }}
+          aws-region: us-east-1
 
       - name: Create layer directory structure
         run: |
@@ -79,7 +79,7 @@ jobs:
             --description "$DESCRIPTION" \
             --zip-file fileb://lambda-layer.zip \
             --compatible-runtimes python3.10 python3.11 python3.12 \
-            --region <aws-region> \
+            --region us-east-1 \
             --output json)
 
           LAYER_ARN=$(echo "$LAYER_OUTPUT" | jq -r '.LayerArn')
