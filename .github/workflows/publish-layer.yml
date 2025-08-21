@@ -1,0 +1,134 @@
+name: Publish PyPI Package to Lambda Layer
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: 'Package version to download'
+        required: true
+        type: string
+      confirm:
+        description: 'Type "yes" to confirm publishing the layer'
+        required: true
+        type: string
+
+jobs:
+  publish-layer:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Checkout strands-agents/docs repository
+        uses: actions/checkout@v4
+        with:
+          repository: dbschmigelski/docs
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path: docs-repo
+      - name: Validate confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "yes" ]; then
+            echo "Confirmation failed. You must type 'yes' to proceed."
+            exit 1
+          fi
+          echo "Confirmation validated"
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: <aws-region>
+
+      - name: Create layer directory structure
+        run: |
+          mkdir -p layer/python
+
+      - name: Download and install package
+        run: |
+          pip install "strands-agents[all]==${{ inputs.package_version }}" -t layer/python/
+
+      - name: Remove unnecessary files
+        run: |
+          find layer/python -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+          find layer/python -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
+          find layer/python -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
+          find layer/python -name "*.pyc" -delete 2>/dev/null || true
+
+      - name: Create layer zip
+        run: |
+          cd layer
+          zip -r ../lambda-layer.zip .
+
+      - name: Publish Lambda Layer
+        id: publish-layer
+        run: |
+          DESCRIPTION="PyPI package: strands-agents with [all] optional dependencies v${{ inputs.package_version }}"
+
+          LAYER_OUTPUT=$(aws lambda publish-layer-version \
+            --layer-name "strands-agents" \
+            --description "$DESCRIPTION" \
+            --zip-file fileb://lambda-layer.zip \
+            --compatible-runtimes python3.10 python3.11 python3.12 \
+            --region <aws-region> \
+            --output json)
+
+          LAYER_ARN=$(echo "$LAYER_OUTPUT" | jq -r '.LayerArn')
+          LAYER_VERSION=$(echo "$LAYER_OUTPUT" | jq -r '.Version')
+
+          echo "layer_arn=$LAYER_ARN" >> $GITHUB_OUTPUT
+          echo "layer_version=$LAYER_VERSION" >> $GITHUB_OUTPUT
+          echo "Published layer version $LAYER_VERSION with ARN: $LAYER_ARN"
+
+      - name: Update docs repository with new layer info
+        run: |
+          cd docs-repo
+
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create or update lambda-layers.md file
+          LAYERS_FILE="lambda-layers.md"
+
+          # Create file if it doesn't exist
+          if [ ! -f "$LAYERS_FILE" ]; then
+            echo "# Lambda Layers" > "$LAYERS_FILE"
+            echo "" >> "$LAYERS_FILE"
+            echo "## Available Layers" >> "$LAYERS_FILE"
+            echo "" >> "$LAYERS_FILE"
+          fi
+
+          # Prepare new layer entry
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          NEW_ENTRY="- **<package-name> v${{ inputs.package_version }}** (Version ${{ steps.publish-layer.outputs.layer_version }})"
+          NEW_ENTRY="$NEW_ENTRY"$'\n'"  - ARN: \`${{ steps.publish-layer.outputs.layer_arn }}:${{ steps.publish-layer.outputs.layer_version }}\`"
+          NEW_ENTRY="$NEW_ENTRY"$'\n'"  - Published: $TIMESTAMP"
+          NEW_ENTRY="$NEW_ENTRY"$'\n'"  - Compatible Runtimes: python3.10, python3.11, python3.12"
+          NEW_ENTRY="$NEW_ENTRY"$'\n'"  - Status: Active"
+          NEW_ENTRY="$NEW_ENTRY"$'\n'
+
+          # Insert new entry at the top of the list (after the "## Available Layers" header)
+          awk -v new_entry="$NEW_ENTRY" '
+            /^## Available Layers/ {
+              print $0
+              print ""
+              print new_entry
+              next
+            }
+            { print }
+          ' "$LAYERS_FILE" > "${LAYERS_FILE}.tmp" && mv "${LAYERS_FILE}.tmp" "$LAYERS_FILE"
+
+          # Commit and push changes
+          git add "$LAYERS_FILE"
+          git commit -m "Add lambda layer: strands-agents v${{ inputs.package_version }} (version ${{ steps.publish-layer.outputs.layer_version }})"
+          git push
