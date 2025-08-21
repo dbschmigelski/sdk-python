@@ -55,7 +55,7 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install "strands-agents[all]==${{ inputs.package_version }}" -t layer/python/
+          pip install "strands-agents==${{ inputs.package_version }}" -t layer/python/
 
       - name: Remove unnecessary files
         run: |
@@ -72,7 +72,7 @@ jobs:
       - name: Publish Lambda Layer
         id: publish-layer
         run: |
-          DESCRIPTION="PyPI package: strands-agents with [all] optional dependencies v${{ inputs.package_version }}"
+          DESCRIPTION="PyPI package: strands-agents with no optional dependencies v${{ inputs.package_version }}"
 
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
             --layer-name "strands-agents" \
