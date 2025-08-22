@@ -27,7 +27,7 @@ jobs:
       - name: Checkout strands-agents/docs repository
         uses: actions/checkout@v4
         with:
-          repository: dbschmigelski/docs
+          repository: strands-agents/docs
           token: ${{ secrets.GITHUB_TOKEN }}
           path: docs-repo
       - name: Validate confirmation
@@ -41,12 +41,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.STRANDS_INTEG_TEST_ROLE }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: us-east-1
 
       - name: Create layer directory structure
@@ -55,7 +55,7 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install "strands-agents[all]==${{ inputs.package_version }}" -t layer/python/
+          pip install <package-name>==${{ inputs.package_version }} -t layer/python/
 
       - name: Remove unnecessary files
         run: |
@@ -69,66 +69,34 @@ jobs:
           cd layer
           zip -r ../lambda-layer.zip .
 
-      - name: Publish Lambda Layer
-        id: publish-layer
+      - name: Create S3 bucket for layer storage
         run: |
-          DESCRIPTION="PyPI package: strands-agents with [all] optional dependencies v${{ inputs.package_version }}"
+          BUCKET_NAME="dea-strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
+          REGION="us-east-1"
 
-          LAYER_OUTPUT=$(aws lambda publish-layer-version \
-            --layer-name "strands-agents" \
-            --description "$DESCRIPTION" \
-            --zip-file fileb://lambda-layer.zip \
-            --compatible-runtimes python3.10 python3.11 python3.12 \
-            --region us-east-1\
-            --output json)
+          # Check if bucket exists
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "Bucket $BUCKET_NAME already exists"
+          else
+            echo "Creating bucket $BUCKET_NAME"
+            aws s3api create-bucket --bucket "$BUCKET_NAME" --region "us-east-1"
 
-          LAYER_ARN=$(echo "$LAYER_OUTPUT" | jq -r '.LayerArn')
-          LAYER_VERSION=$(echo "$LAYER_OUTPUT" | jq -r '.Version')
+            # Enable versioning for better layer management
+            aws s3api put-bucket-versioning \
+              --bucket "$BUCKET_NAME" \
+              --versioning-configuration Status=Enabled
+
+          echo "BUCKET_NAME=$BUCKET_NAME" >> $GITHUB_ENV
+
+      - name: Upload layer to S3
+        run: |
+          LAYER_KEY="strands-agents/v${{ inputs.package_version }}/lambda-layer.zip"
+
+          aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY"
+
+          echo "LAYER_S3_KEY=$LAYER_KEY" >> $GITHUB_ENV
+          echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
 
           echo "layer_arn=$LAYER_ARN" >> $GITHUB_OUTPUT
           echo "layer_version=$LAYER_VERSION" >> $GITHUB_OUTPUT
           echo "Published layer version $LAYER_VERSION with ARN: $LAYER_ARN"
-
-      - name: Update docs repository with new layer info
-        run: |
-          cd docs-repo
-
-          # Configure git
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Create or update lambda-layers.md file
-          LAYERS_FILE="lambda-layers.md"
-
-          # Create file if it doesn't exist
-          if [ ! -f "$LAYERS_FILE" ]; then
-            echo "# Lambda Layers" > "$LAYERS_FILE"
-            echo "" >> "$LAYERS_FILE"
-            echo "## Available Layers" >> "$LAYERS_FILE"
-            echo "" >> "$LAYERS_FILE"
-          fi
-
-          # Prepare new layer entry
-          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          NEW_ENTRY="- **<package-name> v${{ inputs.package_version }}** (Version ${{ steps.publish-layer.outputs.layer_version }})"
-          NEW_ENTRY="$NEW_ENTRY"$'\n'"  - ARN: \`${{ steps.publish-layer.outputs.layer_arn }}:${{ steps.publish-layer.outputs.layer_version }}\`"
-          NEW_ENTRY="$NEW_ENTRY"$'\n'"  - Published: $TIMESTAMP"
-          NEW_ENTRY="$NEW_ENTRY"$'\n'"  - Compatible Runtimes: python3.10, python3.11, python3.12"
-          NEW_ENTRY="$NEW_ENTRY"$'\n'"  - Status: Active"
-          NEW_ENTRY="$NEW_ENTRY"$'\n'
-
-          # Insert new entry at the top of the list (after the "## Available Layers" header)
-          awk -v new_entry="$NEW_ENTRY" '
-            /^## Available Layers/ {
-              print $0
-              print ""
-              print new_entry
-              next
-            }
-            { print }
-          ' "$LAYERS_FILE" > "${LAYERS_FILE}.tmp" && mv "${LAYERS_FILE}.tmp" "$LAYERS_FILE"
-
-          # Commit and push changes
-          git add "$LAYERS_FILE"
-          git commit -m "Add lambda layer: strands-agents v${{ inputs.package_version }} (version ${{ steps.publish-layer.outputs.layer_version }})"
-          git push
