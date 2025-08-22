@@ -27,7 +27,7 @@ jobs:
       - name: Checkout strands-agents/docs repository
         uses: actions/checkout@v4
         with:
-          repository: strands-agents/docs
+          repository: dbschmigelski/docs
           token: ${{ secrets.GITHUB_TOKEN }}
           path: docs-repo
       - name: Validate confirmation
@@ -41,7 +41,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -55,7 +55,7 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install strands-agents==${{ inputs.package_version }} -t layer/python/
+          pip install "strands-agents[all]==${{ inputs.package_version }}" -t layer/python/
 
       - name: Remove unnecessary files
         run: |
@@ -69,73 +69,17 @@ jobs:
           cd layer
           zip -r ../lambda-layer.zip .
 
-      - name: Create S3 bucket for layer storage
-        run: |
-          BUCKET_NAME="dea-strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
-          REGION="us-east-1"
-
-          # Check if bucket exists
-          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
-            echo "Bucket $BUCKET_NAME already exists"
-          else
-            echo "Creating bucket $BUCKET_NAME"
-            if [ "$REGION" = "us-east-1" ]; then
-              # us-east-1 doesn't need LocationConstraint
-              aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION"
-            else
-              aws s3api create-bucket \
-                --bucket "$BUCKET_NAME" \
-                --region "$REGION" \
-                --create-bucket-configuration LocationConstraint="$REGION"
-            fi
-
-            # Enable versioning for better layer management
-            aws s3api put-bucket-versioning \
-              --bucket "$BUCKET_NAME" \
-              --versioning-configuration Status=Enabled
-
-            # Set lifecycle policy to clean up old versions after 90 days
-            cat > lifecycle-policy.json << EOF
-          {
-            "Rules": [
-              {
-                "ID": "DeleteOldVersions",
-                "Status": "Enabled",
-                "NoncurrentVersionExpiration": {
-                  "NoncurrentDays": 90
-                }
-              }
-            ]
-          }
-          EOF
-
-            aws s3api put-bucket-lifecycle-configuration \
-              --bucket "$BUCKET_NAME" \
-              --lifecycle-configuration file://lifecycle-policy.json
-          fi
-
-          echo "BUCKET_NAME=$BUCKET_NAME" >> $GITHUB_ENV
-
-      - name: Upload layer to S3
-        run: |
-          LAYER_KEY="strands-agents-all/v${{ inputs.package_version }}/lambda-layer.zip"
-
-          aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY"
-
-          echo "LAYER_S3_KEY=$LAYER_KEY" >> $GITHUB_ENV
-          echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
-
-      - name: Publish Lambda Layer from S3
+      - name: Publish Lambda Layer
         id: publish-layer
         run: |
-          DESCRIPTION="PyPI package: <package-name> v${{ inputs.package_version }}"
+          DESCRIPTION="PyPI package: strands-agents with [all] optional dependencies v${{ inputs.package_version }}"
 
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
-            --layer-name <layer-name> \
+            --layer-name "strands-agents" \
             --description "$DESCRIPTION" \
-            --content S3Bucket="$BUCKET_NAME",S3Key="$LAYER_S3_KEY" \
+            --zip-file fileb://lambda-layer.zip \
             --compatible-runtimes python3.10 python3.11 python3.12 \
-            --region us-east-1 \
+            --region us-east-1\
             --output json)
 
           LAYER_ARN=$(echo "$LAYER_OUTPUT" | jq -r '.LayerArn')
@@ -186,5 +130,5 @@ jobs:
 
           # Commit and push changes
           git add "$LAYERS_FILE"
-          git commit -m "Add lambda layer: <package-name> v${{ inputs.package_version }} (version ${{ steps.publish-layer.outputs.layer_version }})"
+          git commit -m "Add lambda layer: strands-agents v${{ inputs.package_version }} (version ${{ steps.publish-layer.outputs.layer_version }})"
           git push
