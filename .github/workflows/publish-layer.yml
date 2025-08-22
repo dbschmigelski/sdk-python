@@ -68,28 +68,10 @@ jobs:
         run: |
           cd layer
           zip -r ../lambda-layer.zip .
-
-      - name: Create S3 bucket for layer storage
-        run: |
-          BUCKET_NAME="dea-strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
-          REGION="us-east-1"
-
-          # Check if bucket exists
-          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
-            echo "Bucket $BUCKET_NAME already exists"
-          else
-            echo "Creating bucket $BUCKET_NAME"
-            aws s3api create-bucket --bucket "$BUCKET_NAME" --region "us-east-1"
-
-            # Enable versioning for better layer management
-            aws s3api put-bucket-versioning \
-              --bucket "$BUCKET_NAME" \
-              --versioning-configuration Status=Enabled
-
-          echo "BUCKET_NAME=$BUCKET_NAME" >> $GITHUB_ENV
-
+          
       - name: Upload layer to S3
         run: |
+          BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
           LAYER_KEY="strands-agents/v${{ inputs.package_version }}/lambda-layer.zip"
 
           aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY"
