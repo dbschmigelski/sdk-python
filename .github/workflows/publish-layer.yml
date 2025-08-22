@@ -55,7 +55,7 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install <package-name>==${{ inputs.package_version }} -t layer/python/
+          pip install strands-agents==${{ inputs.package_version }} -t layer/python/
 
       - name: Remove unnecessary files
         run: |
