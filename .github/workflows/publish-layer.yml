@@ -46,7 +46,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.STRANDS_INTEG_TEST_ROLE }}
           aws-region: us-east-1
 
       - name: Create layer directory structure
