@@ -15,6 +15,10 @@ on:
 jobs:
   publish-layer:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+        architecture: ['x86_64', 'aarch64']
 
     permissions:
       id-token: write
@@ -41,7 +45,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.12'
+          python-version: ${{ matrix.python-version }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -55,10 +59,9 @@ jobs:
 
       - name: Download and install package
         run: |
-          # 
           pip install strands-agents==${{ inputs.package_version }} \
-            --python-version 3.12 \
-            --platform manylinux2014_aarch64 \
+            --python-version ${{ matrix.python-version }} \
+            --platform manylinux2014_${{ matrix.architecture }} \
             -t layer/python/ \
             --only-binary=:all:
 
@@ -69,20 +72,22 @@ jobs:
           
       - name: Upload layer to S3
         run: |
-          LAYER_NAME="strands-agents"
+          PYTHON_VERSION="${{ matrix.python-version }}"
+          ARCH="${{ matrix.architecture }}"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION}-${ARCH}"
           BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
           aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY"
           echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
 
-          DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }}"
+          DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
 
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
             --layer-name $LAYER_NAME \
             --description "$DESCRIPTION" \
             --content S3Bucket=$BUCKET_NAME,S3Key=$LAYER_KEY \
-            --compatible-runtimes python3.10 python3.11 python3.12 \
+            --compatible-runtimes python$PYTHON_VERSION \
             --region us-east-1 \
             --license-info Apache-2.0 \
             --output json)
