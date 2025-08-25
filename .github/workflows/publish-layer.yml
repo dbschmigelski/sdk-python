@@ -41,7 +41,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.10'
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -55,14 +55,8 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install strands-agents==${{ inputs.package_version }} -t layer/python/
-
-      - name: Remove unnecessary files
-        run: |
-          find layer/python -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-          find layer/python -type d -name "*.dist-info" -exec rm -rf {} + 2>/dev/null || true
-          find layer/python -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
-          find layer/python -name "*.pyc" -delete 2>/dev/null || true
+          # 
+          pip install strands-agents==${{ inputs.package_version }} --platform manylinux2014_aarch64 --only-binary=:all -t layer/python/
 
       - name: Create layer zip
         run: |
