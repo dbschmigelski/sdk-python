@@ -71,8 +71,9 @@ jobs:
           
       - name: Upload layer to S3
         run: |
+          LAYER_NAME="strands-agents"
           BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
-          LAYER_KEY="strands-agents/v${{ inputs.package_version }}/lambda-layer.zip"
+          LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
           aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY"
           echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
@@ -80,7 +81,7 @@ jobs:
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }}"
 
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
-            --layer-name strands-agents \
+            --layer-name $LAYER_NAME \
             --description "$DESCRIPTION" \
             --content S3Bucket=$BUCKET_NAME,S3Key=$LAYER_KEY \
             --compatible-runtimes python3.10 python3.11 python3.12 \
@@ -94,3 +95,13 @@ jobs:
           echo "layer_arn=$LAYER_ARN" >> $GITHUB_OUTPUT
           echo "layer_version=$LAYER_VERSION" >> $GITHUB_OUTPUT
           echo "Published layer version $LAYER_VERSION with ARN: $LAYER_ARN"
+
+          aws lambda add-layer-version-permission \
+            --layer-name $LAYER_NAME \
+            --version-number $LAYER_VERSION \
+            --statement-id public \
+            --action lambda:GetLayerVersion \
+            --principal '*' \
+            --region us-east-1
+      
+          echo "Made layer version $LAYER_VERSION public"
