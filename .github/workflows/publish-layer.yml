@@ -75,8 +75,6 @@ jobs:
           LAYER_KEY="strands-agents/v${{ inputs.package_version }}/lambda-layer.zip"
 
           aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY"
-
-          echo "LAYER_S3_KEY=$LAYER_KEY" >> $GITHUB_ENV
           echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }}"
@@ -84,7 +82,7 @@ jobs:
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
             --layer-name strands-agents \
             --description "$DESCRIPTION" \
-            --content S3Bucket="$BUCKET_NAME",S3Key="$LAYER_KEY" \
+            --content S3Bucket=$BUCKET_NAME,S3Key=$LAYER_KEY \
             --compatible-runtimes python3.10 python3.11 python3.12 \
             --region us-east-1 \
             --output json)
