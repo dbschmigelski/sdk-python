@@ -41,7 +41,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -57,7 +57,7 @@ jobs:
         run: |
           # 
           pip install strands-agents==${{ inputs.package_version }} \
-            --python-version 3.11 \
+            --python-version 3.12 \
             --platform manylinux2014_aarch64 \
             -t layer/python/ \
             --only-binary=:all:
