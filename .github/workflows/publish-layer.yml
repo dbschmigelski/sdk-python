@@ -74,7 +74,7 @@ jobs:
         run: |
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
-          LAYER_NAME="strands-agents-py${PYTHON_VERSION}-${ARCH}"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
           BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
