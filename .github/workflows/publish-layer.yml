@@ -79,14 +79,6 @@ jobs:
           echo "LAYER_S3_KEY=$LAYER_KEY" >> $GITHUB_ENV
           echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
 
-          echo "layer_arn=$LAYER_ARN" >> $GITHUB_OUTPUT
-          echo "layer_version=$LAYER_VERSION" >> $GITHUB_OUTPUT
-          echo "Published layer version $LAYER_VERSION with ARN: $LAYER_ARN"
-
-
-      - name: Publish Lambda Layer from S3
-        id: publish-layer
-        run: |
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }}"
 
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
