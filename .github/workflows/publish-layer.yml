@@ -56,7 +56,11 @@ jobs:
       - name: Download and install package
         run: |
           # 
-          pip install strands-agents==${{ inputs.package_version }} --python-version 3.10 --platform manylinux2014_aarch64 -t layer/python/ --only-binary=:all
+          pip install strands-agents==${{ inputs.package_version }} \
+            --python-version 3.10 \
+            --platform manylinux2014_aarch64 \
+            -t layer/python/ \
+            --only-binary=:all:
 
       - name: Create layer zip
         run: |
