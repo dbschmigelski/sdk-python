@@ -85,6 +85,7 @@ jobs:
             --content S3Bucket=$BUCKET_NAME,S3Key=$LAYER_KEY \
             --compatible-runtimes python3.10 python3.11 python3.12 \
             --region us-east-1 \
+            --license-info Apache-2.0 \
             --output json)
 
           LAYER_ARN=$(echo "$LAYER_OUTPUT" | jq -r '.LayerArn')
