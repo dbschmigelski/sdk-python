@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       confirm:
-        description: 'Type "yes" to confirm publishing the layer'
+        description: 'Type "Create Lambda Layer" to confirm publishing the layer'
         required: true
         type: string
 
@@ -32,8 +32,8 @@ jobs:
           path: docs-repo
       - name: Validate confirmation
         run: |
-          if [ "${{ inputs.confirm }}" != "yes" ]; then
-            echo "Confirmation failed. You must type 'yes' to proceed."
+          if [ "${{ inputs.confirm }}" != "Create Lambda Layer" ]; then
+            echo "Confirmation failed. You must type 'Create Lambda Layer' to proceed."
             exit 1
           fi
           echo "Confirmation validated"
