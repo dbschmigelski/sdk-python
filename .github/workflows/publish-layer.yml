@@ -82,3 +82,24 @@ jobs:
           echo "layer_arn=$LAYER_ARN" >> $GITHUB_OUTPUT
           echo "layer_version=$LAYER_VERSION" >> $GITHUB_OUTPUT
           echo "Published layer version $LAYER_VERSION with ARN: $LAYER_ARN"
+
+
+      - name: Publish Lambda Layer from S3
+        id: publish-layer
+        run: |
+          DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }}"
+
+          LAYER_OUTPUT=$(aws lambda publish-layer-version \
+            --layer-name strands-agents \
+            --description "$DESCRIPTION" \
+            --content S3Bucket="$BUCKET_NAME",S3Key="$LAYER_S3_KEY" \
+            --compatible-runtimes python3.10 python3.11 python3.12 \
+            --region <aws-region> \
+            --output json)
+
+          LAYER_ARN=$(echo "$LAYER_OUTPUT" | jq -r '.LayerArn')
+          LAYER_VERSION=$(echo "$LAYER_OUTPUT" | jq -r '.Version')
+
+          echo "layer_arn=$LAYER_ARN" >> $GITHUB_OUTPUT
+          echo "layer_version=$LAYER_VERSION" >> $GITHUB_OUTPUT
+          echo "Published layer version $LAYER_VERSION with ARN: $LAYER_ARN"
