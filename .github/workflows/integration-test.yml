@@ -37,7 +37,7 @@ jobs:
               return "manual-approval"
             }
   check-access-and-checkout:
-    runs-on: ubuntu-latest
+    runs-on: "windows"
     needs: authorization-check
     environment: ${{ needs.authorization-check.outputs.approval-env }}
     permissions:
