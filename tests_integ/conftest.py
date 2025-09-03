@@ -78,11 +78,6 @@ def _load_api_keys_from_secrets_manager():
         return
 
     required_providers = {
-        "ANTHROPIC_API_KEY",
-        "COHERE_API_KEY",
-        "MISTRAL_API_KEY",
-        "OPENAI_API_KEY",
-        "WRITER_API_KEY",
     }
     for provider in required_providers:
         if provider not in os.environ or not os.environ[provider]:
