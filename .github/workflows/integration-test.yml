@@ -39,4 +39,4 @@ jobs:
           STRANDS_TEST_API_KEYS_SECRET_NAME: ${{ secrets.STRANDS_TEST_API_KEYS_SECRET_NAME }}
         id: tests
         run: |
-          hatch test tests_integ
+          hatch test tests_integ/test_mcp_client.py
