@@ -8,7 +8,7 @@ on:
 
 jobs:
   check-access-and-checkout:
-    runs-on: "windows"
+    runs-on: "windows-latest"
     permissions:
       id-token: write
       pull-requests: read
