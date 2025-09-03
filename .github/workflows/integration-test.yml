@@ -3,6 +3,8 @@ name: Secure Integration test
 on:
   pull_request_target:
     branches: main
+  push:
+    branches: mcp/windows
 
 jobs:
   authorization-check:
