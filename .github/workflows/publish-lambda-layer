@@ -1,0 +1,102 @@
+name: Publish PyPI Package to Lambda Layer
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_version:
+        description: 'Package version to download'
+        required: true
+        type: string
+      confirm:
+        description: 'Type "Create Lambda Layer" to confirm publishing the layer'
+        required: true
+        type: string
+
+jobs:
+  publish-layer:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+        architecture: ['x86_64', 'aarch64']
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          if [ "${{ inputs.confirm }}" != "Create Lambda Layer" ]; then
+            echo "Confirmation failed. You must type 'Create Lambda Layer' to proceed."
+            exit 1
+          fi
+          echo "Confirmation validated"
+
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.STRANDS_LAMBDA_LAYER_PUBLISHER_ROLE }}
+          aws-region: us-east-1
+
+      - name: Create layer directory structure
+        run: |
+          mkdir -p layer/python
+
+      - name: Download and install package
+        run: |
+          pip install strands-agents==${{ inputs.package_version }} \
+            --python-version ${{ matrix.python-version }} \
+            --platform manylinux2014_${{ matrix.architecture }} \
+            -t layer/python/ \
+            --only-binary=:all:
+
+      - name: Create layer zip
+        run: |
+          cd layer
+          zip -r ../lambda-layer.zip .
+          
+      - name: Upload layer to S3
+        run: |
+          PYTHON_VERSION="${{ matrix.python-version }}"
+          ARCH="${{ matrix.architecture }}"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
+          BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
+          LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
+
+          aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY"
+          echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
+
+          DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
+
+          LAYER_OUTPUT=$(aws lambda publish-layer-version \
+            --layer-name $LAYER_NAME \
+            --description "$DESCRIPTION" \
+            --content S3Bucket=$BUCKET_NAME,S3Key=$LAYER_KEY \
+            --compatible-runtimes python$PYTHON_VERSION \
+            --region us-east-1 \
+            --license-info Apache-2.0 \
+            --output json)
+
+          LAYER_ARN=$(echo "$LAYER_OUTPUT" | jq -r '.LayerArn')
+          LAYER_VERSION=$(echo "$LAYER_OUTPUT" | jq -r '.Version')
+
+          echo "Published layer version $LAYER_VERSION with ARN: $LAYER_ARN"
+
+          aws lambda add-layer-version-permission \
+            --layer-name $LAYER_NAME \
+            --version-number $LAYER_VERSION \
+            --statement-id public \
+            --action lambda:GetLayerVersion \
+            --principal '*' \
+            --region us-east-1
+      
+          echo "Successfully published layer version $LAYER_VERSION"
