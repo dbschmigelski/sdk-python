@@ -1,4 +1,4 @@
-name: Publish Lambda Layer
+name: Publish PyPI Package to Lambda Layer
 
 on:
   workflow_dispatch:
@@ -35,16 +35,13 @@ env:
   IS_FULL_DEPLOY: ${{ inputs.python_version == 'ALL' && inputs.architecture == 'ALL' && inputs.region == 'ALL' }}
 
 jobs:
-  publish-layer:
+  package-and-upload:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ${{ inputs.python_version == 'ALL' && fromJson('["3.10", "3.11", "3.12", "3.13"]') || fromJson(format('["{}"', inputs.python_version, ']')) }}
         architecture: ${{ inputs.architecture == 'ALL' && fromJson('["x86_64", "aarch64"]') || fromJson(format('["{}"', inputs.architecture, ']')) }}
-        region: ${{ inputs.region == 'ALL' && fromJson('["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]') || fromJson(format('["{}"', inputs.region, ']')) }}
 
-    outputs:
-      layer-version: ${{ env.LAYER_VERSION }}
     permissions:
       id-token: write
       contents: read
@@ -76,7 +73,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.STRANDS_LAMBDA_LAYER_PUBLISHER_ROLE }}
-          aws-region: ${{ matrix.region }}
+          aws-region: us-east-1
 
       - name: Create layer directory structure
         run: |
@@ -94,26 +91,52 @@ jobs:
         run: |
           cd layer
           zip -r ../lambda-layer.zip .
-          
-      - name: Upload layer to S3 and publish
+
+      - name: Upload to S3
+        run: |
+          PYTHON_VERSION="${{ matrix.python-version }}"
+          ARCH="${{ matrix.architecture }}"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
+          BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
+          LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
+
+          if ! aws s3api head-bucket --bucket "$BUCKET_NAME" --region us-east-1 2>/dev/null; then
+            aws s3api create-bucket --bucket "$BUCKET_NAME" --region us-east-1
+          fi
+
+          aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY" --region us-east-1
+          echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
+
+  publish-layer:
+    needs: package-and-upload
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ${{ inputs.python_version == 'ALL' && fromJson('["3.10", "3.11", "3.12", "3.13"]') || fromJson(format('["{}"', inputs.python_version, ']')) }}
+        architecture: ${{ inputs.architecture == 'ALL' && fromJson('["x86_64", "aarch64"]') || fromJson(format('["{}"', inputs.architecture, ']')) }}
+        region: ${{ inputs.region == 'ALL' && fromJson('["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]') || fromJson(format('["{}"', inputs.region, ']')) }}
+
+    outputs:
+      layer-version: ${{ env.LAYER_VERSION }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.STRANDS_LAMBDA_LAYER_PUBLISHER_ROLE }}
+          aws-region: ${{ matrix.region }}
+
+      - name: Publish layer
         run: |
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
-          BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)-${REGION}"
+          BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
-
-          if ! aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
-            if [ "$REGION" = "us-east-1" ]; then
-              aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION"
-            else
-              aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION" --create-bucket-configuration LocationConstraint="$REGION"
-            fi
-          fi
-
-          aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY" --region "$REGION"
-          echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
 
