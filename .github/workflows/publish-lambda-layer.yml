@@ -143,7 +143,7 @@ jobs:
           fi
 
   update-docs:
-    if: ${{ env.IS_FULL_DEPLOY == 'true' }}
+    if: ${{ !inputs.python_version && !inputs.architecture && !inputs.region }}
     needs: publish-layer
     runs-on: ubuntu-latest
     steps:
