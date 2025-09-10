@@ -9,36 +9,39 @@ on:
         type: string
       python_version:
         description: 'Python version'
-        required: false
+        required: true
+        default: 'ALL'
         type: choice
-        options: ['3.10', '3.11', '3.12', '3.13']
+        options: ['ALL', '3.10', '3.11', '3.12', '3.13']
       architecture:
         description: 'Architecture'
-        required: false
+        required: true
+        default: 'ALL'
         type: choice
-        options: ['x86_64', 'aarch64']
+        options: ['ALL', 'x86_64', 'aarch64']
       region:
         description: 'AWS region'
-        required: false
+        required: true
+        default: 'ALL'
         type: choice
         # Only non opt-in regions included for now
-        options: ['us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'ap-south-1', 'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-southeast-1', 'ap-southeast-2', 'ca-central-1', 'eu-central-1', 'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-north-1', 'sa-east-1']
+        options: ['ALL', 'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'ap-south-1', 'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-southeast-1', 'ap-southeast-2', 'ca-central-1', 'eu-central-1', 'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-north-1', 'sa-east-1']
       confirm:
         description: 'Type "Create Lambda Layer" to confirm publishing the layer'
         required: true
         type: string
 
 env:
-  IS_FULL_DEPLOY: ${{ !inputs.python_version && !inputs.architecture && !inputs.region }}
+  IS_FULL_DEPLOY: ${{ inputs.python_version == 'ALL' && inputs.architecture == 'ALL' && inputs.region == 'ALL' }}
 
 jobs:
   publish-layer:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ${{ inputs.python_version && fromJson(format('["{}"', inputs.python_version)) || fromJson('["3.10", "3.11", "3.12", "3.13"]') }}
-        architecture: ${{ inputs.architecture && fromJson(format('["{}"', inputs.architecture)) || fromJson('["x86_64", "aarch64"]') }}
-        region: ${{ inputs.region && fromJson(format('["{}"', inputs.region)) || fromJson('["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]') }}
+        python-version: ${{ inputs.python_version == 'ALL' && fromJson('["3.10", "3.11", "3.12", "3.13"]') || fromJson(format('["{}"', inputs.python_version, ']')) }}
+        architecture: ${{ inputs.architecture == 'ALL' && fromJson('["x86_64", "aarch64"]') || fromJson(format('["{}"', inputs.architecture, ']')) }}
+        region: ${{ inputs.region == 'ALL' && fromJson('["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]') || fromJson(format('["{}"', inputs.region, ']')) }}
 
     outputs:
       layer-version: ${{ env.LAYER_VERSION }}
@@ -143,7 +146,7 @@ jobs:
           fi
 
   update-docs:
-    if: ${{ !inputs.python_version && !inputs.architecture && !inputs.region }}
+    if: ${{ inputs.python_version == 'ALL' && inputs.architecture == 'ALL' && inputs.region == 'ALL' }}
     needs: publish-layer
     runs-on: ubuntu-latest
     steps:
