@@ -36,7 +36,7 @@ env:
   BUCKET_NAME: strands-agents-lambda-layer-032316178046
 
 jobs:
-  setup:
+  create-buckets:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -198,41 +198,3 @@ jobs:
           if [ "${{ env.IS_FULL_DEPLOY }}" = "true" ] && [ "$REGION" = "us-east-1" ] && [ "$PYTHON_VERSION" = "3.10" ] && [ "$ARCH" = "x86_64" ]; then
             echo "LAYER_VERSION=$LAYER_VERSION" >> $GITHUB_ENV
           fi
-
-  update-docs:
-    if: ${{ inputs.python_version == 'ALL' && inputs.architecture == 'ALL' && inputs.region == 'ALL' }}
-    needs: publish-layer
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout docs repository
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/docs
-          token: ${{ secrets.GITHUB_TOKEN }}
-          path: docs
-
-      - name: Update lambda layers documentation
-        run: |
-          cd docs
-          LAYER_VERSION="${{ needs.publish-layer.outputs.layer-version }}"
-          NEW_ROW="| $LAYER_VERSION | [${{ inputs.package_version }}](https://pypi.org/project/strands-agents/${{ inputs.package_version }}) | \`arn:aws:lambda:{REGION}:856699698935:layer:strands-agents-{VERSION}-{ARCHITECTURE}:$LAYER_VERSION\` |"
-          
-          sed -i "/<!-- LAYER_TABLE_START -->/a\$NEW_ROW" docs/user-guide/deploy/lambda-layers.md
-
-      - name: Create Pull Request
-        run: |
-          cd docs
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          BRANCH="update-lambda-layers-${{ inputs.package_version }}"
-          git checkout -b "$BRANCH"
-          git add docs/user-guide/deploy/lambda-layers.md
-          git commit -m "Update lambda layers with version ${{ inputs.package_version }}"
-          git push origin "$BRANCH"
-          
-          gh pr create \
-            --title "Update lambda layers documentation for v${{ inputs.package_version }}" \
-            --body "Automated update to add new lambda layer version ${{ inputs.package_version }}" \
-            --head "$BRANCH" \
-            --base main
