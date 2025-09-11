@@ -21,6 +21,11 @@ This document defines the standard operating procedures for managing Strands Age
 
 ## Deployment Process
 
+### Staging Region
+- **us-east-1** serves as the staging region for all layer packages
+- S3 bucket and layer zip files are created in us-east-1
+- All other regions reference the same S3 objects from us-east-1
+
 ### 1. Initial Deployment
 1. Run workflow with ALL options selected (default)
 2. Specify PyPI package version

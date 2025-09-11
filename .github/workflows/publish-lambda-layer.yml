@@ -33,6 +33,7 @@ on:
 
 env:
   IS_FULL_DEPLOY: ${{ inputs.python_version == 'ALL' && inputs.architecture == 'ALL' && inputs.region == 'ALL' }}
+  BUCKET_NAME: strands-agents-lambda-layer-032316178046
 
 jobs:
   setup:
@@ -47,12 +48,16 @@ jobs:
           role-to-assume: ${{ secrets.STRANDS_LAMBDA_LAYER_PUBLISHER_ROLE }}
           aws-region: us-east-1
 
-      - name: Create S3 bucket
+      - name: Create S3 bucket with versioning
         run: |
-          BUCKET_NAME="strands-agents-lambda-layers-032316178046"
+          BUCKET_NAME="${{ env.BUCKET_NAME }}"
           if ! aws s3api head-bucket --bucket "$BUCKET_NAME" --region us-east-1 2>/dev/null; then
             aws s3api create-bucket --bucket "$BUCKET_NAME" --region us-east-1
-            echo "Created S3 bucket: $BUCKET_NAME"
+            
+            # Enable versioning (required for CRR)
+            aws s3api put-bucket-versioning --bucket "$BUCKET_NAME" --versioning-configuration Status=Enabled --region us-east-1
+            
+            echo "Created S3 bucket with versioning: $BUCKET_NAME"
           else
             echo "S3 bucket already exists: $BUCKET_NAME"
           fi
@@ -120,7 +125,7 @@ jobs:
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
-          BUCKET_NAME="strands-agents-lambda-layers-032316178046"
+          BUCKET_NAME="${{ env.BUCKET_NAME }}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
           aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY" --region us-east-1
@@ -154,7 +159,7 @@ jobs:
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
-          BUCKET_NAME="strands-agents-lambda-layers-032316178046"
+          BUCKET_NAME="${{ env.BUCKET_NAME }}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
