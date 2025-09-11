@@ -68,7 +68,7 @@ jobs:
           fi
 
   package-and-upload:
-    needs: setup
+    needs: create-buckets
     runs-on: ubuntu-latest
     strategy:
       matrix:
