@@ -34,10 +34,14 @@ on:
 env:
   IS_FULL_DEPLOY: ${{ inputs.python_version == 'ALL' && inputs.architecture == 'ALL' && inputs.region == 'ALL' }}
   BUCKET_NAME: strands-agents-lambda-layer-032316178046
+  REGIONS: '["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]'
 
 jobs:
   setup:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        region: ${{ inputs.region == 'ALL' && fromJson(env.REGIONS) || fromJson(format('["{}"', inputs.region, ']')) }}
     permissions:
       id-token: write
       contents: read
@@ -46,20 +50,33 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.STRANDS_LAMBDA_LAYER_PUBLISHER_ROLE }}
-          aws-region: us-east-1
+          aws-region: ${{ matrix.region }}
 
-      - name: Create S3 bucket with versioning
+      - name: Create S3 buckets
         run: |
-          BUCKET_NAME="${{ env.BUCKET_NAME }}"
-          if ! aws s3api head-bucket --bucket "$BUCKET_NAME" --region us-east-1 2>/dev/null; then
-            aws s3api create-bucket --bucket "$BUCKET_NAME" --region us-east-1
-            
-            # Enable versioning (required for CRR)
-            aws s3api put-bucket-versioning --bucket "$BUCKET_NAME" --versioning-configuration Status=Enabled --region us-east-1
-            
-            echo "Created S3 bucket with versioning: $BUCKET_NAME"
+          REGION="${{ matrix.region }}"
+          SOURCE_BUCKET="${{ env.BUCKET_NAME }}"
+          REGION_BUCKET="${{ env.BUCKET_NAME }}-${REGION}"
+          
+          # Create source bucket (us-east-1 only)
+          if [ "$REGION" = "us-east-1" ]; then
+            if ! aws s3api head-bucket --bucket "$SOURCE_BUCKET" --region us-east-1 2>/dev/null; then
+              aws s3api create-bucket --bucket "$SOURCE_BUCKET" --region us-east-1
+              aws s3api put-bucket-versioning --bucket "$SOURCE_BUCKET" --versioning-configuration Status=Enabled --region us-east-1
+              echo "Created source S3 bucket with versioning: $SOURCE_BUCKET"
+            fi
+          fi
+          
+          # Create regional bucket
+          if ! aws s3api head-bucket --bucket "$REGION_BUCKET" --region "$REGION" 2>/dev/null; then
+            if [ "$REGION" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$REGION_BUCKET" --region "$REGION"
+            else
+              aws s3api create-bucket --bucket "$REGION_BUCKET" --region "$REGION" --create-bucket-configuration LocationConstraint="$REGION"
+            fi
+            echo "Created regional S3 bucket: $REGION_BUCKET"
           else
-            echo "S3 bucket already exists: $BUCKET_NAME"
+            echo "Regional S3 bucket already exists: $REGION_BUCKET"
           fi
 
   package-and-upload:
@@ -138,7 +155,7 @@ jobs:
       matrix:
         python-version: ${{ inputs.python_version == 'ALL' && fromJson('["3.10", "3.11", "3.12", "3.13"]') || fromJson(format('["{}"', inputs.python_version, ']')) }}
         architecture: ${{ inputs.architecture == 'ALL' && fromJson('["x86_64", "aarch64"]') || fromJson(format('["{}"', inputs.architecture, ']')) }}
-        region: ${{ inputs.region == 'ALL' && fromJson('["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]') || fromJson(format('["{}"', inputs.region, ']')) }}
+        region: ${{ inputs.region == 'ALL' && fromJson(env.REGIONS) || fromJson(format('["{}"', inputs.region, ']')) }}
 
     outputs:
       layer-version: ${{ env.LAYER_VERSION }}
@@ -159,15 +176,19 @@ jobs:
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
-          BUCKET_NAME="${{ env.BUCKET_NAME }}"
+          SOURCE_BUCKET="${{ env.BUCKET_NAME }}"
+          REGION_BUCKET="${{ env.BUCKET_NAME }}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
+
+          # Copy layer zip from source bucket to region bucket
+          aws s3 cp "s3://$SOURCE_BUCKET/$LAYER_KEY" "s3://$REGION_BUCKET/$LAYER_KEY" --source-region us-east-1 --region "$REGION"
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
 
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
             --layer-name $LAYER_NAME \
             --description "$DESCRIPTION" \
-            --content S3Bucket=$BUCKET_NAME,S3Key=$LAYER_KEY \
+            --content S3Bucket=$REGION_BUCKET,S3Key=$LAYER_KEY \
             --compatible-runtimes python${{ matrix.python-version }} \
             --region "$REGION" \
             --license-info Apache-2.0 \
