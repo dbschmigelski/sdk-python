@@ -35,7 +35,30 @@ env:
   IS_FULL_DEPLOY: ${{ inputs.python_version == 'ALL' && inputs.architecture == 'ALL' && inputs.region == 'ALL' }}
 
 jobs:
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.STRANDS_LAMBDA_LAYER_PUBLISHER_ROLE }}
+          aws-region: us-east-1
+
+      - name: Create S3 bucket
+        run: |
+          BUCKET_NAME="strands-agents-lambda-layers-032316178046"
+          if ! aws s3api head-bucket --bucket "$BUCKET_NAME" --region us-east-1 2>/dev/null; then
+            aws s3api create-bucket --bucket "$BUCKET_NAME" --region us-east-1
+            echo "Created S3 bucket: $BUCKET_NAME"
+          else
+            echo "S3 bucket already exists: $BUCKET_NAME"
+          fi
+
   package-and-upload:
+    needs: setup
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -97,12 +120,8 @@ jobs:
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
-          BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
+          BUCKET_NAME="strands-agents-lambda-layers-032316178046"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
-
-          if ! aws s3api head-bucket --bucket "$BUCKET_NAME" --region us-east-1 2>/dev/null; then
-            aws s3api create-bucket --bucket "$BUCKET_NAME" --region us-east-1
-          fi
 
           aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY" --region us-east-1
           echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
@@ -135,7 +154,7 @@ jobs:
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
-          BUCKET_NAME="strands-agents-lambda-layers-$(aws sts get-caller-identity --query Account --output text)"
+          BUCKET_NAME="strands-agents-lambda-layers-032316178046"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
