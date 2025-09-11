@@ -54,17 +54,17 @@ jobs:
       - name: Create S3 bucket
         run: |
           REGION="${{ matrix.region }}"
-          BUCKET_NAME="${{ env.BUCKET_NAME }}-${REGION}"
+          REGIONAL_BUCKET="${{ env.BUCKET_NAME }}-${REGION}"
           
-          if ! aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+          if ! aws s3api head-bucket --bucket "$REGIONAL_BUCKET" 2>/dev/null; then
             if [ "$REGION" = "us-east-1" ]; then
-              aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION"
+              aws s3api create-bucket --bucket "$REGIONAL_BUCKET" --region "$REGION" 2>/dev/null || echo "Bucket $REGIONAL_BUCKET already exists"
             else
-              aws s3api create-bucket --bucket "$BUCKET_NAME" --region "$REGION" --create-bucket-configuration LocationConstraint="$REGION"
+              aws s3api create-bucket --bucket "$REGIONAL_BUCKET" --region "$REGION" --create-bucket-configuration LocationConstraint="$REGION" 2>/dev/null || echo "Bucket $REGIONAL_BUCKET already exists"
             fi
-            echo "Created S3 bucket: $BUCKET_NAME"
+            echo "S3 bucket ready: $REGIONAL_BUCKET"
           else
-            echo "S3 bucket already exists: $BUCKET_NAME"
+            echo "S3 bucket already exists: $REGIONAL_BUCKET"
           fi
 
   package-and-upload:
