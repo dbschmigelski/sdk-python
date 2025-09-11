@@ -74,6 +74,7 @@ jobs:
       matrix:
         python-version: ${{ inputs.python_version == 'ALL' && fromJson('["3.10", "3.11", "3.12", "3.13"]') || fromJson(format('["{}"', inputs.python_version, ']')) }}
         architecture: ${{ inputs.architecture == 'ALL' && fromJson('["x86_64", "aarch64"]') || fromJson(format('["{}"', inputs.architecture, ']')) }}
+        region: ${{ inputs.region == 'ALL' && fromJson('["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]') || fromJson(format('["{}"', inputs.region, ']')) }}
 
     permissions:
       id-token: write
@@ -106,7 +107,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.STRANDS_LAMBDA_LAYER_PUBLISHER_ROLE }}
-          aws-region: us-east-1
+          aws-region: ${{ matrix.region }}
 
       - name: Create layer directory structure
         run: |
@@ -129,11 +130,12 @@ jobs:
         run: |
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
+          REGION="${{ matrix.region }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
-          BUCKET_NAME="${{ env.BUCKET_NAME }}-us-east-1"
+          BUCKET_NAME="${{ env.BUCKET_NAME }}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
-          aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY" --region us-east-1
+          aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY" --region "$REGION"
           echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
 
   publish-layer:
@@ -166,12 +168,6 @@ jobs:
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
           REGION_BUCKET="${{ env.BUCKET_NAME }}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
-
-          # Copy layer zip from us-east-1 bucket to region bucket
-          if [ "$REGION" != "us-east-1" ]; then
-            SOURCE_BUCKET="${{ env.BUCKET_NAME }}-us-east-1"
-            aws s3 cp "s3://$SOURCE_BUCKET/$LAYER_KEY" "s3://$REGION_BUCKET/$LAYER_KEY" --source-region us-east-1 --region "$REGION"
-          fi
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
 
@@ -240,5 +236,3 @@ jobs:
             --body "Automated update to add new lambda layer version ${{ inputs.package_version }}" \
             --head "$BRANCH" \
             --base main
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
