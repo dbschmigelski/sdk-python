@@ -35,7 +35,21 @@ env:
   BUCKET_NAME: strands-agents-lambda-layer
 
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation
+        run: |
+          CONFIRM="${{ inputs.confirm }}"
+          EXPECTED="Create Lambda Layer ${{ inputs.package_version }}"
+          if [ "$CONFIRM" != "$EXPECTED" ]; then
+            echo "Confirmation failed. You must type exactly '$EXPECTED' to proceed."
+            exit 1
+          fi
+          echo "Confirmation validated"
+
   create-buckets:
+    needs: validate
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -77,22 +91,8 @@ jobs:
 
     permissions:
       id-token: write
-      contents: read
 
     steps:
-      - name: Validate confirmation
-        run: |
-          CONFIRM="${{ inputs.confirm }}"
-          EXPECTED="Create Lambda Layer ${{ inputs.package_version }}"
-          if [ "$CONFIRM" != "$EXPECTED" ]; then
-            echo "Confirmation failed. You must type exactly '$EXPECTED' to proceed."
-            exit 1
-          fi
-          echo "Confirmation validated"
-
-      - name: Checkout current repository
-        uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
@@ -145,7 +145,6 @@ jobs:
 
     permissions:
       id-token: write
-      contents: read
 
     steps:
       - name: Configure AWS credentials
