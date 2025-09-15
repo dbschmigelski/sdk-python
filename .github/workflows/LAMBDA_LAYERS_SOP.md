@@ -34,9 +34,11 @@ When some regions fail during deployment:
 
 ### Yank Procedure
 1. Use the `yank_lambda_layer` GitHub action workflow
-2. **Full yank**: Run with ALL options selected (default) to yank all 136 variants
-3. **Partial yank**: Specify Python versions, architectures, and regions for targeted yanking
-4. **Update documentation**: Remove or mark the row as yanked in lambda-layers.md
-5. **Communication**: Notify users through appropriate channels
+2. Specify the layer version to yank
+3. Type "Yank Lambda Layer {layer_version}" to confirm
+4. **Full yank**: Run with ALL options selected (default) to yank all 136 variants
+5. **Partial yank**: Specify Python versions, architectures, and regions for targeted yanking
+6. **Update documentation**: Remove or mark the row as yanked in lambda-layers.md
+7. **Communication**: Notify users through appropriate channels
 
-**Note**: Yanking removes public permissions making layers private but does not delete them. Use `delete-layer-version` to actually delete layer versions.
+**Note**: Yanking deletes layer versions completely. Existing Lambda functions using the layer continue to work, but new functions cannot use the yanked version.

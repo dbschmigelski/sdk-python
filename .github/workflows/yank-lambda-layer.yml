@@ -27,14 +27,16 @@ on:
         # Only non opt-in regions included for now
         options: ['ALL', 'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'ap-south-1', 'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-southeast-1', 'ap-southeast-2', 'ca-central-1', 'eu-central-1', 'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-north-1', 'sa-east-1']
       confirm:
-        description: 'Type "Yank Lambda Layer" to confirm yanking the layer'
+        description: 'Type "Yank Lambda Layer {layer version}" to confirm yanking the layer'
         required: true
         type: string
 
 jobs:
   yank-layer:
     runs-on: ubuntu-latest
+    continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         python-version: ${{ inputs.python_version == 'ALL' && fromJson('["3.10", "3.11", "3.12", "3.13"]') || fromJson(format('["{0}"]', inputs.python_version)) }}
         architecture: ${{ inputs.architecture == 'ALL' && fromJson('["x86_64", "aarch64"]') || fromJson(format('["{0}"]', inputs.architecture)) }}
@@ -47,8 +49,9 @@ jobs:
       - name: Validate confirmation
         run: |
           CONFIRM="${{ inputs.confirm }}"
-          if [ "$CONFIRM" != "Yank Lambda Layer" ]; then
-            echo "Confirmation failed. You must type exactly 'Yank Lambda Layer' to proceed."
+          EXPECTED="Yank Lambda Layer ${{ inputs.layer_version }}"
+          if [ "$CONFIRM" != "$EXPECTED" ]; then
+            echo "Confirmation failed. You must type exactly '$EXPECTED' to proceed."
             exit 1
           fi
           echo "Confirmation validated"
@@ -69,12 +72,10 @@ jobs:
 
           echo "Attempting to yank layer $LAYER_NAME version $LAYER_VERSION in region $REGION"
 
-          # Remove public permissions (ignore errors if version doesn't exist)
-          # Note: This makes the layer private but does not delete it - use delete-layer-version to actually delete
-          aws lambda remove-layer-version-permission \
+          # Delete the layer version completely
+          aws lambda delete-layer-version \
             --layer-name $LAYER_NAME \
             --version-number $LAYER_VERSION \
-            --statement-id public \
-            --region "$REGION" 2>/dev/null || echo "Layer version $LAYER_VERSION not found or already yanked for $LAYER_NAME in $REGION"
+            --region "$REGION"
 
           echo "Completed yank attempt for layer $LAYER_NAME version $LAYER_VERSION in region $REGION"

@@ -165,11 +165,19 @@ jobs:
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
 
+          # Set compatible architecture based on matrix architecture
+          if [ "$ARCH" = "x86_64" ]; then
+            COMPATIBLE_ARCH="x86_64"
+          else
+            COMPATIBLE_ARCH="arm64"
+          fi
+
           LAYER_OUTPUT=$(aws lambda publish-layer-version \
             --layer-name $LAYER_NAME \
             --description "$DESCRIPTION" \
             --content S3Bucket=$REGION_BUCKET,S3Key=$LAYER_KEY \
             --compatible-runtimes python${{ matrix.python-version }} \
+            --compatible-architectures $COMPATIBLE_ARCH \
             --region "$REGION" \
             --license-info Apache-2.0 \
             --output json)
