@@ -13,7 +13,7 @@ This document defines the standard operating procedures for managing Strands Age
 2. Specify PyPI package version
 3. Type "Create Lambda Layer {package_version}" to confirm
 4. All 136 individual layers deploy in parallel (4 Python × 2 arch × 17 regions)
-5. Each layer gets its own unique name: `strands-agents-py{PYTHON_VERSION}-{ARCH}-all`
+5. Each layer gets its own unique name: `strands-agents-py{PYTHON_VERSION}-{ARCH}`
 
 ### 2. Version Buffering for New Variants
 When adding new variants (new Python version, architecture, or region):

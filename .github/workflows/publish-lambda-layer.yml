@@ -110,15 +110,11 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install strands-agents[all]==${{ inputs.package_version }} \
+          pip install strands-agents==${{ inputs.package_version }} \
             --python-version ${{ matrix.python-version }} \
             --platform manylinux2014_${{ matrix.architecture }} \
             -t layer/python/ \
             --only-binary=:all:
-      - name: Remove grpc files to reduce size
-        run: |
-          find layer/python -name "*grpc*" -type f -delete
-          find layer/python -name "*grpc*" -type d -exec rm -rf {} + 2>/dev/null || true
 
       - name: Create layer zip
         run: |
@@ -130,7 +126,7 @@ jobs:
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
-          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}-all"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           BUCKET_NAME="${{ env.BUCKET_NAME }}-${ACCOUNT_ID}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
@@ -162,7 +158,7 @@ jobs:
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
-          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}-all"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REGION_BUCKET="${{ env.BUCKET_NAME }}-${ACCOUNT_ID}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"

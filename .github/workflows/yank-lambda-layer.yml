@@ -64,7 +64,7 @@ jobs:
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
-          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}-all"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
           LAYER_VERSION="${{ inputs.layer_version }}"
 
           echo "Attempting to yank layer $LAYER_NAME version $LAYER_VERSION in region $REGION"
