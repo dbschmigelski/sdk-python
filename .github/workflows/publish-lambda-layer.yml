@@ -32,8 +32,7 @@ on:
         type: string
 
 env:
-  IS_FULL_DEPLOY: ${{ inputs.python_version == 'ALL' && inputs.architecture == 'ALL' && inputs.region == 'ALL' }}
-  BUCKET_NAME: strands-agents-lambda-layer-032316178046
+  BUCKET_NAME: strands-agents-lambda-layer
 
 jobs:
   create-buckets:
@@ -53,7 +52,8 @@ jobs:
       - name: Create S3 bucket
         run: |
           REGION="${{ matrix.region }}"
-          REGIONAL_BUCKET="${{ env.BUCKET_NAME }}-${REGION}"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGIONAL_BUCKET="${{ env.BUCKET_NAME }}-${ACCOUNT_ID}-${REGION}"
           
           if ! aws s3api head-bucket --bucket "$REGIONAL_BUCKET" 2>/dev/null; then
             if [ "$REGION" = "us-east-1" ]; then
@@ -127,7 +127,8 @@ jobs:
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}-all"
-          BUCKET_NAME="${{ env.BUCKET_NAME }}-${REGION}"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET_NAME="${{ env.BUCKET_NAME }}-${ACCOUNT_ID}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
           aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY" --region "$REGION"
@@ -142,8 +143,6 @@ jobs:
         architecture: ${{ inputs.architecture == 'ALL' && fromJson('["x86_64", "aarch64"]') || fromJson(format('["{0}"]', inputs.architecture)) }}
         region: ${{ inputs.region == 'ALL' && fromJson('["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]') || fromJson(format('["{0}"]', inputs.region)) }}
 
-    outputs:
-      layer-version: ${{ env.LAYER_VERSION }}
     permissions:
       id-token: write
       contents: read
@@ -161,7 +160,8 @@ jobs:
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}-all"
-          REGION_BUCKET="${{ env.BUCKET_NAME }}-${REGION}"
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          REGION_BUCKET="${{ env.BUCKET_NAME }}-${ACCOUNT_ID}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
@@ -189,7 +189,3 @@ jobs:
             --region "$REGION"
       
           echo "Successfully published layer version $LAYER_VERSION in region $REGION"
-          
-          if [ "${{ env.IS_FULL_DEPLOY }}" = "true" ] && [ "$REGION" = "us-east-1" ] && [ "$PYTHON_VERSION" = "3.10" ] && [ "$ARCH" = "x86_64" ]; then
-            echo "LAYER_VERSION=$LAYER_VERSION" >> $GITHUB_ENV
-          fi
