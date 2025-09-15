@@ -110,11 +110,12 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install "strands-agents==${{ inputs.package_version }}[all]" \
+          pip install strands-agents==${{ inputs.package_version }} \
             --python-version ${{ matrix.python-version }} \
             --platform manylinux2014_${{ matrix.architecture }} \
             -t layer/python/ \
             --only-binary=:all:
+            --extras "all"
 
       - name: Create layer zip
         run: |
