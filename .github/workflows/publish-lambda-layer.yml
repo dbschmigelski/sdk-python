@@ -115,6 +115,10 @@ jobs:
             --platform manylinux2014_${{ matrix.architecture }} \
             -t layer/python/ \
             --only-binary=:all:
+      - name: Remove grpc files to reduce size
+        run: |
+          find layer/python -name "*grpc*" -type f -delete
+          find layer/python -name "*grpc*" -type d -exec rm -rf {} + 2>/dev/null || true
 
       - name: Create layer zip
         run: |
