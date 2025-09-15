@@ -43,7 +43,6 @@ jobs:
         region: ${{ inputs.region == 'ALL' && fromJson('["us-east-1", "us-east-2", "us-west-1", "us-west-2", "ap-south-1", "ap-northeast-1", "ap-northeast-2", "ap-northeast-3", "ap-southeast-1", "ap-southeast-2", "ca-central-1", "eu-central-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "sa-east-1"]') || fromJson(format('["{0}"]', inputs.region)) }}
     permissions:
       id-token: write
-      contents: read
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -84,13 +83,9 @@ jobs:
       - name: Validate confirmation
         run: |
           CONFIRM="${{ inputs.confirm }}"
-          if [ "$CONFIRM" != "Create Lambda Layer" ]; then
-            if [[ "$CONFIRM" =~ ^(x86_64|aarch64|3\.[0-9]+|[a-z]+-[a-z]+-[0-9]+)$ ]]; then
-              echo "Error: You entered '$CONFIRM' which looks like an architecture, Python version, or region."
-              echo "Please type exactly 'Create Lambda Layer' to confirm."
-            else
-              echo "Confirmation failed. You must type exactly 'Create Lambda Layer' to proceed."
-            fi
+          EXPECTED="Create Lambda Layer ${{ inputs.package_version }}"
+          if [ "$CONFIRM" != "$EXPECTED" ]; then
+            echo "Confirmation failed. You must type exactly '$EXPECTED' to proceed."
             exit 1
           fi
           echo "Confirmation validated"
@@ -115,7 +110,7 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install strands-agents==${{ inputs.package_version }} \
+          pip install strands-agents==${{ inputs.package_version }}[all] \
             --python-version ${{ matrix.python-version }} \
             --platform manylinux2014_${{ matrix.architecture }} \
             -t layer/python/ \
@@ -131,7 +126,7 @@ jobs:
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
-          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}-all"
           BUCKET_NAME="${{ env.BUCKET_NAME }}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
@@ -165,7 +160,7 @@ jobs:
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
-          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
+          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}-all"
           REGION_BUCKET="${{ env.BUCKET_NAME }}-${REGION}"
           LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
 
