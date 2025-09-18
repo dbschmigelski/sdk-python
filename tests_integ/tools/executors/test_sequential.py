@@ -49,13 +49,16 @@ def agent(tool_executor, time_tool, weather_tool):
 
 @pytest.mark.asyncio
 async def test_agent_invoke_async_tool_executor(agent, tool_events):
-    await agent.invoke_async("What is the time and weather in New York?")
+    try:
+        await agent.invoke_async("What is the time and weather in New York?")
 
-    tru_events = tool_events
-    exp_events = [
-        {"name": "time_tool", "event": "start"},
-        {"name": "time_tool", "event": "end"},
-        {"name": "weather_tool", "event": "start"},
-        {"name": "weather_tool", "event": "end"},
-    ]
-    assert tru_events == exp_events
+        tru_events = tool_events
+        exp_events = [
+            {"name": "time_tool", "event": "start"},
+            {"name": "time_tool", "event": "end"},
+            {"name": "weather_tool", "event": "start"},
+            {"name": "weather_tool", "event": "end"},
+        ]
+        assert tru_events == exp_events
+    finally:
+        agent.cleanup()

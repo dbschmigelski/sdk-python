@@ -111,54 +111,57 @@ async def test_graph_execution_with_string(math_agent, summary_agent, validation
         system_prompt="You are a summarization expert. Create concise, clear summaries of complex information.",
     )
 
-    # Add various node types
-    builder.add_node(nested_computation_graph, "computation_subgraph")  # Nested Graph node
-    builder.add_node(math_agent, "secondary_math")  # Agent node
-    builder.add_node(validation_agent, "validator")  # Agent node with condition
-    builder.add_node(summary_agent, "primary_summary")  # Agent node
-    builder.add_node(summary_agent_duplicate, "secondary_summary")  # Another Agent node
+    try:
+        # Add various node types
+        builder.add_node(nested_computation_graph, "computation_subgraph")  # Nested Graph node
+        builder.add_node(math_agent, "secondary_math")  # Agent node
+        builder.add_node(validation_agent, "validator")  # Agent node with condition
+        builder.add_node(summary_agent, "primary_summary")  # Agent node
+        builder.add_node(summary_agent_duplicate, "secondary_summary")  # Another Agent node
 
-    # Add edges with various configurations
-    builder.add_edge("computation_subgraph", "secondary_math")  # Graph -> Agent
-    builder.add_edge("computation_subgraph", "validator", condition=should_validate)  # Conditional edge
-    builder.add_edge("secondary_math", "primary_summary")  # Agent -> Agent
-    builder.add_edge("validator", "primary_summary")  # Agent -> Agent
-    builder.add_edge("primary_summary", "secondary_summary", condition=proceed_to_second_summary)  # Conditional (false)
+        # Add edges with various configurations
+        builder.add_edge("computation_subgraph", "secondary_math")  # Graph -> Agent
+        builder.add_edge("computation_subgraph", "validator", condition=should_validate)  # Conditional edge
+        builder.add_edge("secondary_math", "primary_summary")  # Agent -> Agent
+        builder.add_edge("validator", "primary_summary")  # Agent -> Agent
+        builder.add_edge("primary_summary", "secondary_summary", condition=proceed_to_second_summary)  # Conditional (false)
 
-    builder.set_entry_point("computation_subgraph")
+        builder.set_entry_point("computation_subgraph")
 
-    graph = builder.build()
+        graph = builder.build()
 
-    task = (
-        "Calculate 15 + 27 and 8 * 6, analyze both results, perform additional calculations, validate everything, "
-        "and provide a comprehensive summary"
-    )
-    result = await graph.invoke_async(task)
+        task = (
+            "Calculate 15 + 27 and 8 * 6, analyze both results, perform additional calculations, validate everything, "
+            "and provide a comprehensive summary"
+        )
+        result = await graph.invoke_async(task)
 
-    # Verify results
-    assert result.status.value == "completed"
-    assert result.total_nodes == 5
-    assert result.completed_nodes == 4  # All except secondary_summary (blocked by false condition)
-    assert result.failed_nodes == 0
-    assert len(result.results) == 4
+        # Verify results
+        assert result.status.value == "completed"
+        assert result.total_nodes == 5
+        assert result.completed_nodes == 4  # All except secondary_summary (blocked by false condition)
+        assert result.failed_nodes == 0
+        assert len(result.results) == 4
 
-    # Verify execution order - extract node_ids from GraphNode objects
-    execution_order_ids = [node.node_id for node in result.execution_order]
-    # With parallel execution, secondary_math and validator can complete in any order
-    assert execution_order_ids[0] == "computation_subgraph"  # First
-    assert execution_order_ids[3] == "primary_summary"  # Last
-    assert set(execution_order_ids[1:3]) == {"secondary_math", "validator"}  # Middle two in any order
+        # Verify execution order - extract node_ids from GraphNode objects
+        execution_order_ids = [node.node_id for node in result.execution_order]
+        # With parallel execution, secondary_math and validator can complete in any order
+        assert execution_order_ids[0] == "computation_subgraph"  # First
+        assert execution_order_ids[3] == "primary_summary"  # Last
+        assert set(execution_order_ids[1:3]) == {"secondary_math", "validator"}  # Middle two in any order
 
-    # Verify specific nodes completed
-    assert "computation_subgraph" in result.results
-    assert "secondary_math" in result.results
-    assert "validator" in result.results
-    assert "primary_summary" in result.results
-    assert "secondary_summary" not in result.results  # Should be blocked by condition
+        # Verify specific nodes completed
+        assert "computation_subgraph" in result.results
+        assert "secondary_math" in result.results
+        assert "validator" in result.results
+        assert "primary_summary" in result.results
+        assert "secondary_summary" not in result.results  # Should be blocked by condition
 
-    # Verify nested graph execution
-    nested_result = result.results["computation_subgraph"].result
-    assert nested_result.status.value == "completed"
+        # Verify nested graph execution
+        nested_result = result.results["computation_subgraph"].result
+        assert nested_result.status.value == "completed"
+    finally:
+        summary_agent_duplicate.cleanup()
 
 
 @pytest.mark.asyncio

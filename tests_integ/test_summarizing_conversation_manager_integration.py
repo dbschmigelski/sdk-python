@@ -139,48 +139,51 @@ def test_summarization_with_context_overflow(model):
         messages=messages,
     )
 
-    # Should have the pre-built conversation history
-    initial_message_count = len(agent.messages)
-    assert initial_message_count == 6  # 3 user + 3 assistant messages
+    try:
+        # Should have the pre-built conversation history
+        initial_message_count = len(agent.messages)
+        assert initial_message_count == 6  # 3 user + 3 assistant messages
 
-    # Store the last 2 messages before summarization to verify they're preserved
-    messages_before_summary = agent.messages[-2:].copy()
+        # Store the last 2 messages before summarization to verify they're preserved
+        messages_before_summary = agent.messages[-2:].copy()
 
-    # Now manually trigger context reduction to test summarization
-    agent.conversation_manager.reduce_context(agent)
+        # Now manually trigger context reduction to test summarization
+        agent.conversation_manager.reduce_context(agent)
 
-    # Verify summarization occurred
-    assert len(agent.messages) < initial_message_count
-    # Should have: 1 summary + remaining messages
-    # With 6 messages, summary_ratio=0.5, preserve_recent_messages=2:
-    # messages_to_summarize = min(6 * 0.5, 6 - 2) = min(3, 4) = 3
-    # So we summarize 3 messages, leaving 3 remaining + 1 summary = 4 total
-    expected_total_messages = 4
-    assert len(agent.messages) == expected_total_messages
+        # Verify summarization occurred
+        assert len(agent.messages) < initial_message_count
+        # Should have: 1 summary + remaining messages
+        # With 6 messages, summary_ratio=0.5, preserve_recent_messages=2:
+        # messages_to_summarize = min(6 * 0.5, 6 - 2) = min(3, 4) = 3
+        # So we summarize 3 messages, leaving 3 remaining + 1 summary = 4 total
+        expected_total_messages = 4
+        assert len(agent.messages) == expected_total_messages
 
-    # First message should be the summary (assistant message)
-    summary_message = agent.messages[0]
-    assert summary_message["role"] == "user"
-    assert len(summary_message["content"]) > 0
+        # First message should be the summary (assistant message)
+        summary_message = agent.messages[0]
+        assert summary_message["role"] == "user"
+        assert len(summary_message["content"]) > 0
 
-    # Verify the summary contains actual text content
-    summary_content = None
-    for content_block in summary_message["content"]:
-        if "text" in content_block:
-            summary_content = content_block["text"]
-            break
+        # Verify the summary contains actual text content
+        summary_content = None
+        for content_block in summary_message["content"]:
+            if "text" in content_block:
+                summary_content = content_block["text"]
+                break
 
-    assert summary_content is not None
-    assert len(summary_content) > 50  # Should be a substantial summary
+        assert summary_content is not None
+        assert len(summary_content) > 50  # Should be a substantial summary
 
-    # Recent messages should be preserved - verify they're exactly the same
-    recent_messages = agent.messages[-2:]  # Last 2 messages should be preserved
-    assert len(recent_messages) == 2
-    assert recent_messages == messages_before_summary, "The last 2 messages should be preserved exactly as they were"
+        # Recent messages should be preserved - verify they're exactly the same
+        recent_messages = agent.messages[-2:]  # Last 2 messages should be preserved
+        assert len(recent_messages) == 2
+        assert recent_messages == messages_before_summary, "The last 2 messages should be preserved exactly as they were"
 
-    # Agent should still be functional after summarization
-    post_summary_result = agent("That's very interesting, thank you!")
-    assert post_summary_result.message["role"] == "assistant"
+        # Agent should still be functional after summarization
+        post_summary_result = agent("That's very interesting, thank you!")
+        assert post_summary_result.message["role"] == "assistant"
+    finally:
+        agent.cleanup()
 
 
 def test_tool_preservation_during_summarization(model, tools):
@@ -195,105 +198,108 @@ def test_tool_preservation_during_summarization(model, tools):
         load_tools_from_directory=False,
     )
 
-    # Mock conversation with tool usage to avoid API calls and speed up tests
-    greeting_text = """
-    Hello! I'd be happy to help you with calculations. I have access to tools that can 
-    help with math, time, and weather information. What would you like me to calculate for you?
-    """.strip()
+    try:
+        # Mock conversation with tool usage to avoid API calls and speed up tests
+        greeting_text = """
+        Hello! I'd be happy to help you with calculations. I have access to tools that can 
+        help with math, time, and weather information. What would you like me to calculate for you?
+        """.strip()
 
-    weather_response = "The weather in San Francisco is sunny and 72°F. Perfect weather for being outside!"
+        weather_response = "The weather in San Francisco is sunny and 72°F. Perfect weather for being outside!"
 
-    tool_conversation_data = [
-        # Initial greeting exchange
-        {"role": "user", "content": [{"text": "Hello, can you help me with some calculations?"}]},
-        {"role": "assistant", "content": [{"text": greeting_text}]},
-        # Time query with tool use/result pair
-        {"role": "user", "content": [{"text": "What's the current time?"}]},
-        {
-            "role": "assistant",
-            "content": [{"toolUse": {"toolUseId": "time_001", "name": "get_current_time", "input": {}}}],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "toolResult": {
-                        "toolUseId": "time_001",
-                        "content": [{"text": "2024-01-15 14:30:00"}],
-                        "status": "success",
+        tool_conversation_data = [
+            # Initial greeting exchange
+            {"role": "user", "content": [{"text": "Hello, can you help me with some calculations?"}]},
+            {"role": "assistant", "content": [{"text": greeting_text}]},
+            # Time query with tool use/result pair
+            {"role": "user", "content": [{"text": "What's the current time?"}]},
+            {
+                "role": "assistant",
+                "content": [{"toolUse": {"toolUseId": "time_001", "name": "get_current_time", "input": {}}}],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "toolResult": {
+                            "toolUseId": "time_001",
+                            "content": [{"text": "2024-01-15 14:30:00"}],
+                            "status": "success",
+                        }
                     }
-                }
-            ],
-        },
-        {"role": "assistant", "content": [{"text": "The current time is 2024-01-15 14:30:00."}]},
-        # Math calculation with tool use/result pair
-        {"role": "user", "content": [{"text": "What's 25 + 37?"}]},
-        {
-            "role": "assistant",
-            "content": [{"toolUse": {"toolUseId": "calc_001", "name": "calculate_sum", "input": {"a": 25, "b": 37}}}],
-        },
-        {
-            "role": "user",
-            "content": [{"toolResult": {"toolUseId": "calc_001", "content": [{"text": "62"}], "status": "success"}}],
-        },
-        {"role": "assistant", "content": [{"text": "25 + 37 = 62"}]},
-        # Weather query with tool use/result pair
-        {"role": "user", "content": [{"text": "What's the weather like in San Francisco?"}]},
-        {
-            "role": "assistant",
-            "content": [
-                {"toolUse": {"toolUseId": "weather_001", "name": "get_weather", "input": {"city": "San Francisco"}}}
-            ],
-        },
-        {
-            "role": "user",
-            "content": [
-                {
-                    "toolResult": {
-                        "toolUseId": "weather_001",
-                        "content": [{"text": "The weather in San Francisco is sunny and 72°F"}],
-                        "status": "success",
+                ],
+            },
+            {"role": "assistant", "content": [{"text": "The current time is 2024-01-15 14:30:00."}]},
+            # Math calculation with tool use/result pair
+            {"role": "user", "content": [{"text": "What's 25 + 37?"}]},
+            {
+                "role": "assistant",
+                "content": [{"toolUse": {"toolUseId": "calc_001", "name": "calculate_sum", "input": {"a": 25, "b": 37}}}],
+            },
+            {
+                "role": "user",
+                "content": [{"toolResult": {"toolUseId": "calc_001", "content": [{"text": "62"}], "status": "success"}}],
+            },
+            {"role": "assistant", "content": [{"text": "25 + 37 = 62"}]},
+            # Weather query with tool use/result pair
+            {"role": "user", "content": [{"text": "What's the weather like in San Francisco?"}]},
+            {
+                "role": "assistant",
+                "content": [
+                    {"toolUse": {"toolUseId": "weather_001", "name": "get_weather", "input": {"city": "San Francisco"}}}
+                ],
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "toolResult": {
+                            "toolUseId": "weather_001",
+                            "content": [{"text": "The weather in San Francisco is sunny and 72°F"}],
+                            "status": "success",
+                        }
                     }
-                }
-            ],
-        },
-        {"role": "assistant", "content": [{"text": weather_response}]},
-    ]
+                ],
+            },
+            {"role": "assistant", "content": [{"text": weather_response}]},
+        ]
 
-    # Add all the mocked conversation messages to avoid real API calls
-    agent.messages.extend(tool_conversation_data)
+        # Add all the mocked conversation messages to avoid real API calls
+        agent.messages.extend(tool_conversation_data)
 
-    # Force summarization
-    agent.conversation_manager.reduce_context(agent)
+        # Force summarization
+        agent.conversation_manager.reduce_context(agent)
 
-    # Verify tool pairs are still balanced after summarization
-    post_summary_tool_use_count = 0
-    post_summary_tool_result_count = 0
+        # Verify tool pairs are still balanced after summarization
+        post_summary_tool_use_count = 0
+        post_summary_tool_result_count = 0
 
-    for message in agent.messages:
-        for content in message.get("content", []):
-            if "toolUse" in content:
-                post_summary_tool_use_count += 1
-            if "toolResult" in content:
-                post_summary_tool_result_count += 1
+        for message in agent.messages:
+            for content in message.get("content", []):
+                if "toolUse" in content:
+                    post_summary_tool_use_count += 1
+                if "toolResult" in content:
+                    post_summary_tool_result_count += 1
 
-    # Tool uses and results should be balanced (no orphaned tools)
-    assert post_summary_tool_use_count == post_summary_tool_result_count, (
-        "Tool use and tool result counts should be balanced after summarization"
-    )
+        # Tool uses and results should be balanced (no orphaned tools)
+        assert post_summary_tool_use_count == post_summary_tool_result_count, (
+            "Tool use and tool result counts should be balanced after summarization"
+        )
 
-    # Agent should still be able to use tools after summarization
-    agent("Calculate 15 + 28 for me.")
+        # Agent should still be able to use tools after summarization
+        agent("Calculate 15 + 28 for me.")
 
-    # Should have triggered the calculate_sum tool
-    found_calculation = False
-    for message in agent.messages[-2:]:  # Check recent messages
-        for content in message.get("content", []):
-            if "toolResult" in content and "43" in str(content):  # 15 + 28 = 43
-                found_calculation = True
-                break
+        # Should have triggered the calculate_sum tool
+        found_calculation = False
+        for message in agent.messages[-2:]:  # Check recent messages
+            for content in message.get("content", []):
+                if "toolResult" in content and "43" in str(content):  # 15 + 28 = 43
+                    found_calculation = True
+                    break
 
-    assert found_calculation, "Tool should still work after summarization"
+        assert found_calculation, "Tool should still work after summarization"
+    finally:
+        agent.cleanup()
 
 
 def test_dedicated_summarization_agent(model, summarization_model):
@@ -316,59 +322,63 @@ def test_dedicated_summarization_agent(model, summarization_model):
         load_tools_from_directory=False,
     )
 
-    # Mock conversation data for space exploration topic
-    space_intro_response = """
-    Space exploration has been one of humanity's greatest achievements, beginning with early 
-    satellite launches in the 1950s and progressing to human spaceflight, moon landings, and now 
-    commercial space ventures.
-    """.strip()
+    try:
+        # Mock conversation data for space exploration topic
+        space_intro_response = """
+        Space exploration has been one of humanity's greatest achievements, beginning with early 
+        satellite launches in the 1950s and progressing to human spaceflight, moon landings, and now 
+        commercial space ventures.
+        """.strip()
 
-    space_milestones_response = """
-    Key milestones include Sputnik 1 (1957), Yuri Gagarin's first human spaceflight (1961), 
-    the Apollo 11 moon landing (1969), the Space Shuttle program, and the International Space 
-    Station construction.
-    """.strip()
+        space_milestones_response = """
+        Key milestones include Sputnik 1 (1957), Yuri Gagarin's first human spaceflight (1961), 
+        the Apollo 11 moon landing (1969), the Space Shuttle program, and the International Space 
+        Station construction.
+        """.strip()
 
-    apollo_missions_response = """
-    The Apollo program was NASA's lunar exploration program from 1961-1975. Apollo 11 achieved 
-    the first moon landing in 1969 with Neil Armstrong and Buzz Aldrin, followed by five more 
-    successful lunar missions through Apollo 17.
-    """.strip()
+        apollo_missions_response = """
+        The Apollo program was NASA's lunar exploration program from 1961-1975. Apollo 11 achieved 
+        the first moon landing in 1969 with Neil Armstrong and Buzz Aldrin, followed by five more 
+        successful lunar missions through Apollo 17.
+        """.strip()
 
-    spacex_response = """
-    SpaceX has revolutionized space travel with reusable rockets, reducing launch costs dramatically. 
-    They've achieved crew transportation to the ISS, satellite deployments, and are developing 
-    Starship for Mars missions.
-    """.strip()
+        spacex_response = """
+        SpaceX has revolutionized space travel with reusable rockets, reducing launch costs dramatically. 
+        They've achieved crew transportation to the ISS, satellite deployments, and are developing 
+        Starship for Mars missions.
+        """.strip()
 
-    conversation_pairs = [
-        ("I'm interested in learning about space exploration.", space_intro_response),
-        ("What were the key milestones in space exploration?", space_milestones_response),
-        ("Tell me about the Apollo missions.", apollo_missions_response),
-        ("What about modern space exploration with SpaceX?", spacex_response),
-    ]
+        conversation_pairs = [
+            ("I'm interested in learning about space exploration.", space_intro_response),
+            ("What were the key milestones in space exploration?", space_milestones_response),
+            ("Tell me about the Apollo missions.", apollo_missions_response),
+            ("What about modern space exploration with SpaceX?", spacex_response),
+        ]
 
-    # Manually build the conversation history to avoid real API calls
-    for user_input, assistant_response in conversation_pairs:
-        agent.messages.append({"role": "user", "content": [{"text": user_input}]})
-        agent.messages.append({"role": "assistant", "content": [{"text": assistant_response}]})
+        # Manually build the conversation history to avoid real API calls
+        for user_input, assistant_response in conversation_pairs:
+            agent.messages.append({"role": "user", "content": [{"text": user_input}]})
+            agent.messages.append({"role": "assistant", "content": [{"text": assistant_response}]})
 
-    # Force summarization
-    original_length = len(agent.messages)
-    agent.conversation_manager.reduce_context(agent)
+        # Force summarization
+        original_length = len(agent.messages)
+        agent.conversation_manager.reduce_context(agent)
 
-    # Verify summarization occurred
-    assert len(agent.messages) < original_length
+        # Verify summarization occurred
+        assert len(agent.messages) < original_length
 
-    # Get the summary message
-    summary_message = agent.messages[0]
-    assert summary_message["role"] == "user"
+        # Get the summary message
+        summary_message = agent.messages[0]
+        assert summary_message["role"] == "user"
 
-    # Extract summary text
-    summary_text = None
-    for content in summary_message["content"]:
-        if "text" in content:
-            summary_text = content["text"]
-            break
+        # Extract summary text
+        summary_text = None
+        for content in summary_message["content"]:
+            if "text" in content:
+                summary_text = content["text"]
+                break
 
-    assert summary_text
+        assert summary_text
+    finally:
+        agent.cleanup()
+        summarization_agent.cleanup()

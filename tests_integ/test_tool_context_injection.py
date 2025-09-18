@@ -42,15 +42,19 @@ def test_strands_context_integration_context_true():
     """Test ToolContext functionality with real agent interactions."""
 
     agent = Agent(tools=[good_story])
-    agent("using a tool, write a good story")
-
-    _validate_tool_result_content(agent)
+    try:
+        agent("using a tool, write a good story")
+        _validate_tool_result_content(agent)
+    finally:
+        agent.cleanup()
 
 
 def test_strands_context_integration_context_custom():
     """Test ToolContext functionality with real agent interactions."""
 
     agent = Agent(tools=[bad_story])
-    agent("using a tool, write a bad story")
-
-    _validate_tool_result_content(agent)
+    try:
+        agent("using a tool, write a bad story")
+        _validate_tool_result_content(agent)
+    finally:
+        agent.cleanup()

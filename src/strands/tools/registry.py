@@ -17,7 +17,9 @@ from typing_extensions import TypedDict, cast
 
 from strands.tools.decorator import DecoratedFunctionTool
 
+from .._async import run_async
 from ..types.tools import AgentTool, ToolSpec
+from ..experimental.tools import ToolProvider
 from .tools import PythonAgentTool, normalize_schema, normalize_tool_spec
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,7 @@ class ToolRegistry:
         self.registry: Dict[str, AgentTool] = {}
         self.dynamic_tools: Dict[str, AgentTool] = {}
         self.tool_config: Optional[Dict[str, Any]] = None
+        self.tool_providers: List[ToolProvider] = []
 
     def process_tools(self, tools: List[Any]) -> List[str]:
         """Process tools list that can contain tool names, paths, imported modules, or functions.
@@ -93,11 +96,22 @@ class ToolRegistry:
                     if not function_tools:
                         logger.warning("tool_name=<%s>, module_path=<%s> | invalid agent tool", tool_name, module_path)
 
-            # Case 5: AgentTools (which also covers @tool)
+            # Case 5: ToolProvider
+            elif isinstance(tool, ToolProvider):
+                print("encountered tool provider 2")
+                logger.debug("encountered tool provider")
+                self.tool_providers.append(tool)
+                
+                provider_tools = run_async(lambda: tool.load_tools())
+                
+                for provider_tool in provider_tools:
+                    self.register_tool(provider_tool)
+                    tool_names.append(provider_tool.tool_name)
+            # Case 6: AgentTools (which also covers @tool)
             elif isinstance(tool, AgentTool):
                 self.register_tool(tool)
                 tool_names.append(tool.tool_name)
-            # Case 6: Nested iterable (list, tuple, etc.) - add each sub-tool
+            # Case 7: Nested iterable (list, tuple, etc.) - add each sub-tool
             elif isinstance(tool, Iterable) and not isinstance(tool, (str, bytes, bytearray)):
                 for t in tool:
                     add_tool(t)
@@ -612,3 +626,5 @@ class ToolRegistry:
                     logger.warning("tool_name=<%s> | failed to create function tool | %s", name, e)
 
         return tools
+    
+

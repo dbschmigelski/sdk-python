@@ -13,7 +13,6 @@ import asyncio
 import json
 import logging
 import random
-from concurrent.futures import ThreadPoolExecutor
 from typing import (
     Any,
     AsyncGenerator,
@@ -31,6 +30,7 @@ from opentelemetry import trace as trace_api
 from pydantic import BaseModel
 
 from .. import _identifier
+from .._async import run_async
 from ..event_loop.event_loop import event_loop_cycle
 from ..handlers.callback_handler import PrintingCallbackHandler, null_callback_handler
 from ..hooks import (
@@ -55,6 +55,7 @@ from ..types.agent import AgentInput
 from ..types.content import ContentBlock, Message, Messages
 from ..types.exceptions import ContextWindowOverflowException
 from ..types.tools import ToolResult, ToolUse
+from ..experimental.tools import ToolProvider
 from ..types.traces import AttributeValue
 from .agent_result import AgentResult
 from .conversation_manager import (
@@ -160,12 +161,7 @@ class Agent:
 
                     return tool_results[0]
 
-                def tcall() -> ToolResult:
-                    return asyncio.run(acall())
-
-                with ThreadPoolExecutor() as executor:
-                    future = executor.submit(tcall)
-                    tool_result = future.result()
+                tool_result = run_async(acall)
 
                 if record_direct_tool_call is not None:
                     should_record_direct_tool_call = record_direct_tool_call
@@ -208,7 +204,7 @@ class Agent:
         self,
         model: Union[Model, str, None] = None,
         messages: Optional[Messages] = None,
-        tools: Optional[list[Union[str, dict[str, str], Any]]] = None,
+        tools: Optional[list[Union[str, dict[str, str], ToolProvider, Any]]] = None,
         system_prompt: Optional[str] = None,
         callback_handler: Optional[
             Union[Callable[..., Any], _DefaultCallbackHandlerSentinel]
@@ -240,7 +236,8 @@ class Agent:
                 - File paths (e.g., "/path/to/tool.py")
                 - Imported Python modules (e.g., from strands_tools import current_time)
                 - Dictionaries with name/path keys (e.g., {"name": "tool_name", "path": "/path/to/tool.py"})
-                - Functions decorated with `@strands.tool` decorator.
+                - Functions decorated with `@strands.tool` decorator
+                - ToolProvider instances for managed tool collections
 
                 If provided, only these tools will be available. If None, all tools will be available.
             system_prompt: System prompt to guide model behavior.
@@ -332,6 +329,9 @@ class Agent:
                 raise ValueError("state must be an AgentState object or a dict")
         else:
             self.state = AgentState()
+        
+        # Track cleanup state
+        self._cleanup_called = False
 
         self.tool_caller = Agent.ToolCaller(self)
 
@@ -400,12 +400,7 @@ class Agent:
                 - state: The final state of the event loop
         """
 
-        def execute() -> AgentResult:
-            return asyncio.run(self.invoke_async(prompt, **kwargs))
-
-        with ThreadPoolExecutor() as executor:
-            future = executor.submit(execute)
-            return future.result()
+        return run_async(lambda: self.invoke_async(prompt, **kwargs))
 
     async def invoke_async(self, prompt: AgentInput = None, **kwargs: Any) -> AgentResult:
         """Process a natural language prompt through the agent's event loop.
@@ -460,12 +455,7 @@ class Agent:
             ValueError: If no conversation history or prompt is provided.
         """
 
-        def execute() -> T:
-            return asyncio.run(self.structured_output_async(output_model, prompt))
-
-        with ThreadPoolExecutor() as executor:
-            future = executor.submit(execute)
-            return future.result()
+        return run_async(lambda: self.structured_output_async(output_model, prompt))
 
     async def structured_output_async(self, output_model: Type[T], prompt: AgentInput = None) -> T:
         """This method allows you to get structured output from the agent.
@@ -523,6 +513,60 @@ class Agent:
 
             finally:
                 self.hooks.invoke_callbacks(AfterInvocationEvent(agent=self))
+    
+    def cleanup(self) -> None:
+        """Clean up resources used by the agent.
+        
+        This method cleans up all tool providers that require explicit cleanup,
+        such as MCP clients. It should be called when the agent is no longer needed
+        to ensure proper resource cleanup.
+        
+        Note: This method uses a "belt and braces" approach with automatic cleanup
+        through __del__ as a fallback, but explicit cleanup is recommended.
+        """
+        run_async(self.cleanup_async)
+    
+    async def cleanup_async(self) -> None:
+        """Asynchronously clean up resources used by the agent.
+        
+        This method cleans up all tool providers that require explicit cleanup,
+        such as MCP clients. It should be called when the agent is no longer needed
+        to ensure proper resource cleanup.
+        
+        Note: This method uses a "belt and braces" approach with automatic cleanup
+        through __del__ as a fallback, but explicit cleanup is recommended.
+        """
+        if self._cleanup_called:
+            return
+            
+        logger.debug("agent_id=<%s> | cleaning up agent resources", self.agent_id)
+        
+        for provider in self.tool_registry.tool_providers:
+            try:
+                await provider.cleanup()
+                logger.debug("agent_id=<%s>, provider=<%s> | cleaned up tool provider", 
+                           self.agent_id, type(provider).__name__)
+            except Exception as e:
+                logger.warning("agent_id=<%s>, provider=<%s>, error=<%s> | failed to cleanup tool provider", 
+                             self.agent_id, type(provider).__name__, e)
+        
+        self._cleanup_called = True
+        logger.debug("agent_id=<%s> | agent cleanup complete", self.agent_id)
+    
+    def __del__(self) -> None:
+        """Automatic cleanup when agent is garbage collected.
+        
+        This serves as a fallback cleanup mechanism, but explicit cleanup() is preferred.
+        """
+        try:
+            if not self._cleanup_called and self.tool_registry.tool_providers:
+                logger.warning("agent_id=<%s> | Agent cleanup called via __del__. Consider calling agent.cleanup() explicitly for better resource management.", 
+                             self.agent_id)
+                self.cleanup()
+        except Exception:
+            # Silently ignore exceptions during garbage collection cleanup
+            # as exceptions in __del__ can cause issues and are typically ignored
+            pass
 
     async def stream_async(
         self,
