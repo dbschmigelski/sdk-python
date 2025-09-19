@@ -11,7 +11,7 @@ class ToolProvider(ABC):
     """Interface for providing tools with lifecycle management.
 
     Provides a way to load a collection of tools and clean them up
-    when done, without requiring context manager syntax.
+    when done, with lifecycle managed by the agent.
     """
 
     @abstractmethod

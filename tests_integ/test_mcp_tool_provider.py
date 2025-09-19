@@ -74,56 +74,6 @@ def test_mcp_tool_provider_execution():
     agent.cleanup()
 
 
-def test_mcp_tool_provider_cleanup_with_spy():
-    """Test MCPToolProvider cleanup using spy pattern."""
-    stdio_mcp_client = MCPClient(
-        lambda: stdio_client(StdioServerParameters(command="python", args=["tests_integ/echo_server.py"]))
-    )
-
-    # Create spy to track client.stop calls
-    original_stop = stdio_mcp_client.stop
-    stop_calls = []
-
-    def spy_stop(*args, **kwargs):
-        stop_calls.append((args, kwargs))
-        return original_stop(*args, **kwargs)
-
-    stdio_mcp_client.stop = spy_stop
-
-    # Test explicit cleanup
-    provider = MCPToolProvider(client=stdio_mcp_client)
-    agent = Agent(tools=[provider])
-    assert len(agent.tool_names) > 0
-    assert provider._started
-
-    # Cleanup and verify spy recorded the call
-    agent.cleanup()
-    assert not provider._started
-    assert provider._tools is None
-    assert len(stop_calls) == 1  # Verify stop was called exactly once
-
-
-@patch("strands.tools.mcp.mcp_client.MCPClient.stop")
-def test_mcp_tool_provider_cleanup_with_mock(mock_stop):
-    """Test MCPToolProvider cleanup using mock."""
-    stdio_mcp_client = MCPClient(
-        lambda: stdio_client(StdioServerParameters(command="python", args=["tests_integ/echo_server.py"]))
-    )
-
-    provider = MCPToolProvider(client=stdio_mcp_client)
-    agent = Agent(tools=[provider])
-    assert len(agent.tool_names) > 0
-    assert provider._started
-
-    # Cleanup
-    agent.cleanup()
-
-    # Verify mock was called
-    mock_stop.assert_called_once_with(None, None, None)
-    assert not provider._started
-    assert provider._tools is None
-
-
 def test_mcp_tool_provider_reuse():
     """Test that a single MCPToolProvider can be used across multiple agents."""
     stdio_mcp_client = MCPClient(

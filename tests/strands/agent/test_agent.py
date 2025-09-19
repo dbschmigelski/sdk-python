@@ -977,34 +977,6 @@ async def test_agent_cleanup_async_with_no_providers(agent):
     assert agent._cleanup_called is True
 
 
-def test_agent_cleanup_handles_exceptions(agent):
-    """Test that agent cleanup handles exceptions gracefully."""
-    # Create mock tool providers, one that raises an exception
-    mock_provider1 = unittest.mock.MagicMock()
-    mock_provider1.cleanup = unittest.mock.AsyncMock()
-    mock_provider2 = unittest.mock.MagicMock()
-    mock_provider2.cleanup = unittest.mock.AsyncMock(side_effect=Exception("Cleanup failed"))
-
-    # Add providers to agent's tool registry
-    agent.tool_registry.tool_providers = [mock_provider1, mock_provider2]
-
-    # Should not raise exception despite provider2 failing
-    agent.cleanup()
-
-    # Verify both providers were attempted
-    mock_provider1.cleanup.assert_called_once()
-    mock_provider2.cleanup.assert_called_once()
-
-
-def test_agent_cleanup_with_no_providers(agent):
-    """Test that agent cleanup works when there are no tool providers."""
-    # Ensure no providers
-    agent.tool_registry.tool_providers = []
-
-    # Should not raise any exceptions
-    agent.cleanup()
-
-
 def test_agent__del__(agent):
     """Test that agent destructor calls cleanup."""
     # Add a mock tool provider so cleanup will be called

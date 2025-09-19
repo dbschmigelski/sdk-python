@@ -50,9 +50,8 @@ class MCPToolProvider(ToolProvider):
         self._client = client
         self._tool_filters = tool_filters
         self._disambiguator = disambiguator
-        self._tools: Optional[list[MCPAgentTool]] = None
+        self._tools: Optional[list[MCPAgentTool]] = None  # None = not loaded yet, [] = loaded but empty
         self._started = False
-        self._cleanup_called = False
 
     async def load_tools(self) -> Sequence[AgentTool]:
         """Load and return tools from the MCP client.
@@ -143,7 +142,7 @@ class MCPToolProvider(ToolProvider):
         # Create new tool with disambiguated agent name but preserve original MCP name
         old_name = tool.tool_name
         new_agent_name = f"{self._disambiguator}_{tool.mcp_tool.name}"
-        new_tool = MCPAgentTool(tool.mcp_tool, tool.mcp_client, agent_tool_name=new_agent_name)
+        new_tool = MCPAgentTool(tool.mcp_tool, tool.mcp_client, agent_facing_tool_name=new_agent_name)
         logger.debug("tool_rename=<%s->%s> | renamed tool", old_name, new_agent_name)
         return new_tool
 
@@ -163,21 +162,19 @@ class MCPToolProvider(ToolProvider):
 
     async def cleanup(self) -> None:
         """Clean up the MCP client connection."""
-        if self._cleanup_called:
+        if not self._started:
             return
 
-        logger.debug("started=<%s> | cleaning up MCP client", self._started)
-        if self._started:
-            try:
-                logger.debug("stopping MCP client")
-                self._client.stop(None, None, None)
-                logger.debug("MCP client stopped successfully")
-            except Exception as e:
-                logger.error("error=<%s> | failed to cleanup MCP client", e)
-                raise ToolProviderException(f"Failed to cleanup MCP client: {e}") from e
-            finally:
-                self._started = False
-                self._tools = None
-                logger.debug("MCP client cleanup complete")
+        logger.debug("cleaning up MCP client")
+        try:
+            logger.debug("stopping MCP client")
+            self._client.stop(None, None, None)
+            logger.debug("MCP client stopped successfully")
+        except Exception as e:
+            logger.error("error=<%s> | failed to cleanup MCP client", e)
+            raise ToolProviderException(f"Failed to cleanup MCP client: {e}") from e
 
-        self._cleanup_called = True
+        # Only reset state if cleanup succeeded
+        self._started = False
+        self._tools = None
+        logger.debug("MCP client cleanup complete")
