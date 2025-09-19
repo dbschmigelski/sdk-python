@@ -1,18 +1,17 @@
 """MCP Tool Provider implementation."""
 
 import logging
-import re
-from typing import Callable, Optional, Pattern, Union
+from typing import Callable, Optional, Pattern, Sequence, Union
 
 from typing_extensions import TypedDict
 
-logger = logging.getLogger(__name__)
-
-from ....types.exceptions import ToolProviderException
-from ....types.tools import AgentTool
 from ....tools.mcp.mcp_agent_tool import MCPAgentTool
 from ....tools.mcp.mcp_client import MCPClient
+from ....types.exceptions import ToolProviderException
+from ....types.tools import AgentTool
 from ..tool_provider import ToolProvider
+
+logger = logging.getLogger(__name__)
 
 _ToolFilterCallback = Callable[[AgentTool], bool]
 _ToolFilterPattern = Union[str, Pattern[str], _ToolFilterCallback]
@@ -55,15 +54,14 @@ class MCPToolProvider(ToolProvider):
         self._started = False
         self._cleanup_called = False
 
-    async def load_tools(self) -> list[MCPAgentTool]:
+    async def load_tools(self) -> Sequence[AgentTool]:
         """Load and return tools from the MCP client.
 
         Returns:
             List of tools from the MCP server.
         """
         logger.debug("started=<%s>, cached_tools=<%s> | loading tools", self._started, self._tools is not None)
-        logger.error("started=<%s>, cached_tools=<%s> | loading tools", self._started, self._tools is not None)
-        print("started=<%s>, cached_tools=<%s> | loading tools", self._started, self._tools is not None)
+
         if not self._started:
             try:
                 logger.debug("starting MCP client")

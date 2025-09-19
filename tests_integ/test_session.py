@@ -39,8 +39,6 @@ def test_agent_with_file_session(temp_dir):
     test_session_id = str(uuid4())
     # Create a session
     session_manager = FileSessionManager(session_id=test_session_id, storage_dir=temp_dir)
-    agent = None
-    agent_2 = None
     try:
         agent = Agent(session_manager=session_manager)
         agent("Hello!")
@@ -54,10 +52,6 @@ def test_agent_with_file_session(temp_dir):
         assert len(agent_2.messages) == 4
         assert len(session_manager_2.list_messages(test_session_id, agent_2.agent_id)) == 4
     finally:
-        if agent:
-            agent.cleanup()
-        if agent_2:
-            agent_2.cleanup()
         # Delete the session
         session_manager.delete_session(test_session_id)
         assert session_manager.read_session(test_session_id) is None
@@ -68,8 +62,6 @@ def test_agent_with_file_session_and_conversation_manager(temp_dir):
     test_session_id = str(uuid4())
     # Create a session
     session_manager = FileSessionManager(session_id=test_session_id, storage_dir=temp_dir)
-    agent = None
-    agent_2 = None
     try:
         agent = Agent(
             session_manager=session_manager, conversation_manager=SlidingWindowConversationManager(window_size=1)
@@ -90,10 +82,6 @@ def test_agent_with_file_session_and_conversation_manager(temp_dir):
         assert len(agent_2.messages) == 1
         assert len(session_manager_2.list_messages(test_session_id, agent_2.agent_id)) == 4
     finally:
-        if agent:
-            agent.cleanup()
-        if agent_2:
-            agent_2.cleanup()
         # Delete the session
         session_manager.delete_session(test_session_id)
         assert session_manager.read_session(test_session_id) is None
@@ -103,8 +91,6 @@ def test_agent_with_file_session_with_image(temp_dir, yellow_img):
     test_session_id = str(uuid4())
     # Create a session
     session_manager = FileSessionManager(session_id=test_session_id, storage_dir=temp_dir)
-    agent = None
-    agent_2 = None
     try:
         agent = Agent(session_manager=session_manager)
         agent([{"image": {"format": "png", "source": {"bytes": yellow_img}}}])
@@ -118,10 +104,6 @@ def test_agent_with_file_session_with_image(temp_dir, yellow_img):
         assert len(agent_2.messages) == 4
         assert len(session_manager_2.list_messages(test_session_id, agent_2.agent_id)) == 4
     finally:
-        if agent:
-            agent.cleanup()
-        if agent_2:
-            agent_2.cleanup()
         # Delete the session
         session_manager.delete_session(test_session_id)
         assert session_manager.read_session(test_session_id) is None
@@ -130,8 +112,6 @@ def test_agent_with_file_session_with_image(temp_dir, yellow_img):
 def test_agent_with_s3_session(bucket_name):
     test_session_id = str(uuid4())
     session_manager = S3SessionManager(session_id=test_session_id, bucket=bucket_name, region_name="us-west-2")
-    agent = None
-    agent_2 = None
     try:
         agent = Agent(session_manager=session_manager)
         agent("Hello!")
@@ -145,10 +125,6 @@ def test_agent_with_s3_session(bucket_name):
         assert len(agent_2.messages) == 4
         assert len(session_manager_2.list_messages(test_session_id, agent_2.agent_id)) == 4
     finally:
-        if agent:
-            agent.cleanup()
-        if agent_2:
-            agent_2.cleanup()
         session_manager.delete_session(test_session_id)
         assert session_manager.read_session(test_session_id) is None
 
@@ -156,8 +132,6 @@ def test_agent_with_s3_session(bucket_name):
 def test_agent_with_s3_session_with_image(yellow_img, bucket_name):
     test_session_id = str(uuid4())
     session_manager = S3SessionManager(session_id=test_session_id, bucket=bucket_name, region_name="us-west-2")
-    agent = None
-    agent_2 = None
     try:
         agent = Agent(session_manager=session_manager)
         agent([{"image": {"format": "png", "source": {"bytes": yellow_img}}}])
@@ -171,9 +145,5 @@ def test_agent_with_s3_session_with_image(yellow_img, bucket_name):
         assert len(agent_2.messages) == 4
         assert len(session_manager_2.list_messages(test_session_id, agent_2.agent_id)) == 4
     finally:
-        if agent:
-            agent.cleanup()
-        if agent_2:
-            agent_2.cleanup()
         session_manager.delete_session(test_session_id)
         assert session_manager.read_session(test_session_id) is None

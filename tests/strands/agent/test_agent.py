@@ -1066,7 +1066,7 @@ def test_agent__del__no_warning_after_manual_cleanup():
     agent = Agent()
 
     # Call cleanup manually first
-    with unittest.mock.patch.object(agent, "cleanup_async") as mock_cleanup_async:
+    with unittest.mock.patch.object(agent, "cleanup_async"):
         agent.cleanup()
 
     with unittest.mock.patch("strands.agent.agent.logger") as mock_logger:

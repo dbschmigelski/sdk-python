@@ -9,7 +9,6 @@ The Agent interface supports two complementary interaction patterns:
 2. Method-style for direct tool access: `agent.tool.tool_name(param1="value")`
 """
 
-import asyncio
 import json
 import logging
 import random
@@ -32,6 +31,7 @@ from pydantic import BaseModel
 from .. import _identifier
 from .._async import run_async
 from ..event_loop.event_loop import event_loop_cycle
+from ..experimental.tools import ToolProvider
 from ..handlers.callback_handler import PrintingCallbackHandler, null_callback_handler
 from ..hooks import (
     AfterInvocationEvent,
@@ -55,7 +55,6 @@ from ..types.agent import AgentInput
 from ..types.content import ContentBlock, Message, Messages
 from ..types.exceptions import ContextWindowOverflowException
 from ..types.tools import ToolResult, ToolUse
-from ..experimental.tools import ToolProvider
 from ..types.traces import AttributeValue
 from .agent_result import AgentResult
 from .conversation_manager import (
@@ -399,7 +398,6 @@ class Agent:
                 - metrics: Performance metrics from the event loop
                 - state: The final state of the event loop
         """
-
         return run_async(lambda: self.invoke_async(prompt, **kwargs))
 
     async def invoke_async(self, prompt: AgentInput = None, **kwargs: Any) -> AgentResult:
@@ -454,7 +452,6 @@ class Agent:
         Raises:
             ValueError: If no conversation history or prompt is provided.
         """
-
         return run_async(lambda: self.structured_output_async(output_model, prompt))
 
     async def structured_output_async(self, output_model: Type[T], prompt: AgentInput = None) -> T:
@@ -564,16 +561,18 @@ class Agent:
         This serves as a fallback cleanup mechanism, but explicit cleanup() is preferred.
         """
         try:
-            if not self._cleanup_called and self.tool_registry.tool_providers:
-                logger.warning(
-                    "agent_id=<%s> | Agent cleanup called via __del__. Consider calling agent.cleanup() explicitly for better resource management.",
-                    self.agent_id,
-                )
-                self.cleanup()
-        except Exception:
-            # Silently ignore exceptions during garbage collection cleanup
-            # as exceptions in __del__ can cause issues and are typically ignored
-            pass
+            if self._cleanup_called or not self.tool_registry.tool_providers:
+                return
+            
+            logger.warning(
+                "agent_id=<%s> | Agent cleanup called via __del__. "
+                "Consider calling agent.cleanup() explicitly for better resource management.",
+                self.agent_id,
+            )
+            self.cleanup()
+        except Exception as e:
+            # Log exceptions during garbage collection cleanup for debugging
+            logger.debug("agent_id=<%s>, error=<%s> | exception during __del__ cleanup", self.agent_id, e)
 
     async def stream_async(
         self,

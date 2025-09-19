@@ -5,9 +5,7 @@ These types are modeled after the Bedrock API.
 - Bedrock docs: https://docs.aws.amazon.com/bedrock/latest/APIReference/API_Types_Amazon_Bedrock_Runtime.html
 """
 
-import asyncio
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Awaitable, Callable, Literal, Protocol, Union
 
@@ -201,10 +199,6 @@ class ToolFunc(Protocol):
             Tool result or awaitable tool result.
         """
         ...
-
-
-# ToolProvider moved to experimental.tools.ToolProvider
-# Import from strands.experimental.tools import ToolProvider
 
 
 class AgentTool(ABC):

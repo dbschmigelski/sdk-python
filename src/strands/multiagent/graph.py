@@ -18,14 +18,13 @@ import asyncio
 import copy
 import logging
 import time
-
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, Tuple
 
 from opentelemetry import trace as trace_api
 
-from ..agent import Agent
 from .._async import run_async
+from ..agent import Agent
 from ..agent.state import AgentState
 from ..telemetry import get_tracer
 from ..types.content import ContentBlock, Messages

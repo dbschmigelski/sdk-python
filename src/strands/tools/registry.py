@@ -18,8 +18,8 @@ from typing_extensions import TypedDict, cast
 from strands.tools.decorator import DecoratedFunctionTool
 
 from .._async import run_async
-from ..types.tools import AgentTool, ToolSpec
 from ..experimental.tools import ToolProvider
+from ..types.tools import AgentTool, ToolSpec
 from .tools import PythonAgentTool, normalize_schema, normalize_tool_spec
 
 logger = logging.getLogger(__name__)
@@ -98,8 +98,6 @@ class ToolRegistry:
 
             # Case 5: ToolProvider
             elif isinstance(tool, ToolProvider):
-                print("encountered tool provider 2")
-                logger.debug("encountered tool provider")
                 self.tool_providers.append(tool)
 
                 provider_tools = run_async(lambda: tool.load_tools())

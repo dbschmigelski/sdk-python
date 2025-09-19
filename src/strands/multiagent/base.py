@@ -3,15 +3,12 @@
 Provides minimal foundation for multi-agent patterns (Swarm, Graph).
 """
 
-import asyncio
 from abc import ABC, abstractmethod
-
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Union
 
 from .._async import run_async
-
 from ..agent import AgentResult
 from ..types.content import ContentBlock
 from ..types.event_loop import Metrics, Usage

@@ -95,10 +95,6 @@ class MCPAgentTool(AgentTool):
         """
         logger.debug("tool_name=<%s>, tool_use_id=<%s> | streaming", self.tool_name, tool_use["toolUseId"])
 
-        # Always use the original MCP tool name for server calls, not the agent-facing name
-        # print("trying to execute the tool")
-        # yield ToolResultEvent({"status": "success", "content": [], "toolUseId": "123"})
-        # return
         result = await self.mcp_client.call_tool_async(
             tool_use_id=tool_use["toolUseId"],
             name=self.mcp_tool.name,  # Use original MCP name for server communication

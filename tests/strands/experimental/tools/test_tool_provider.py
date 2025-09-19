@@ -1,6 +1,5 @@
 """Unit tests for ToolProvider base class."""
 
-import asyncio
 from abc import ABC
 from unittest.mock import MagicMock
 

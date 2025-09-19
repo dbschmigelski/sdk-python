@@ -80,38 +80,33 @@ def test_swarm_execution_with_string(researcher_agent, analyst_agent, writer_age
     # Create the swarm
     swarm = Swarm([researcher_agent, analyst_agent, writer_agent])
 
-    try:
-        # Define a task that requires collaboration
-        task = (
-            "Research the current AI agent market trends, calculate the growth rate assuming 25% yearly growth, "
-            "and create a basic report"
-        )
+    # Define a task that requires collaboration
+    task = (
+        "Research the current AI agent market trends, calculate the growth rate assuming 25% yearly growth, "
+        "and create a basic report"
+    )
 
-        # Execute the swarm
-        result = swarm(task)
+    # Execute the swarm
+    result = swarm(task)
 
-        # Verify results
-        assert result.status.value == "completed"
-        assert len(result.results) > 0
-        assert result.execution_time > 0
-        assert result.execution_count > 0
+    # Verify results
+    assert result.status.value == "completed"
+    assert len(result.results) > 0
+    assert result.execution_time > 0
+    assert result.execution_count > 0
 
-        # Verify agent history - at least one agent should have been used
-        assert len(result.node_history) > 0
+    # Verify agent history - at least one agent should have been used
+    assert len(result.node_history) > 0
 
-        # Just ensure that hooks are emitted; actual content is not verified
-        researcher_hooks = hook_provider.extract_for(researcher_agent).event_types_received
-        assert BeforeInvocationEvent in researcher_hooks
-        assert MessageAddedEvent in researcher_hooks
-        assert BeforeModelInvocationEvent in researcher_hooks
-        assert BeforeToolInvocationEvent in researcher_hooks
-        assert AfterToolInvocationEvent in researcher_hooks
-        assert AfterModelInvocationEvent in researcher_hooks
-        assert AfterInvocationEvent in researcher_hooks
-    finally:
-        # Cleanup all agents in the swarm
-        for node in swarm.nodes.values():
-            node.executor.cleanup()
+    # Just ensure that hooks are emitted; actual content is not verified
+    researcher_hooks = hook_provider.extract_for(researcher_agent).event_types_received
+    assert BeforeInvocationEvent in researcher_hooks
+    assert MessageAddedEvent in researcher_hooks
+    assert BeforeModelInvocationEvent in researcher_hooks
+    assert BeforeToolInvocationEvent in researcher_hooks
+    assert AfterToolInvocationEvent in researcher_hooks
+    assert AfterModelInvocationEvent in researcher_hooks
+    assert AfterInvocationEvent in researcher_hooks
 
 
 @pytest.mark.asyncio
@@ -120,25 +115,20 @@ async def test_swarm_execution_with_image(researcher_agent, analyst_agent, write
     # Create the swarm
     swarm = Swarm([researcher_agent, analyst_agent, writer_agent])
 
-    try:
-        # Create content blocks with text and image
-        content_blocks: list[ContentBlock] = [
-            {"text": "Analyze this image and create a report about what you see:"},
-            {"image": {"format": "png", "source": {"bytes": yellow_img}}},
-        ]
+    # Create content blocks with text and image
+    content_blocks: list[ContentBlock] = [
+        {"text": "Analyze this image and create a report about what you see:"},
+        {"image": {"format": "png", "source": {"bytes": yellow_img}}},
+    ]
 
-        # Execute the swarm with multi-modal input
-        result = await swarm.invoke_async(content_blocks)
+    # Execute the swarm with multi-modal input
+    result = await swarm.invoke_async(content_blocks)
 
-        # Verify results
-        assert result.status.value == "completed"
-        assert len(result.results) > 0
-        assert result.execution_time > 0
-        assert result.execution_count > 0
+    # Verify results
+    assert result.status.value == "completed"
+    assert len(result.results) > 0
+    assert result.execution_time > 0
+    assert result.execution_count > 0
 
-        # Verify agent history - at least one agent should have been used
-        assert len(result.node_history) > 0
-    finally:
-        # Cleanup all agents in the swarm
-        for node in swarm.nodes.values():
-            node.executor.cleanup()
+    # Verify agent history - at least one agent should have been used
+    assert len(result.node_history) > 0

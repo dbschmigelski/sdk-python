@@ -1,7 +1,6 @@
 """Integration tests for MCPToolProvider with real MCP server."""
 
-import asyncio
-import gc
+import logging
 import re
 from unittest.mock import patch
 
@@ -12,8 +11,6 @@ from strands import Agent
 from strands.experimental.tools.mcp import MCPToolProvider, ToolFilters
 from strands.tools.mcp import MCPClient
 from strands.types.exceptions import ToolProviderException
-
-import logging
 
 logging.basicConfig(level=logging.DEBUG)
 

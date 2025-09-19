@@ -1,7 +1,7 @@
 """Tool provider interface."""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 if TYPE_CHECKING:
     from ...types.tools import AgentTool
@@ -15,7 +15,7 @@ class ToolProvider(ABC):
     """
 
     @abstractmethod
-    async def load_tools(self) -> list["AgentTool"]:
+    async def load_tools(self) -> Sequence["AgentTool"]:
         """Load and return the tools in this provider.
 
         Returns:
