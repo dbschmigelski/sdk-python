@@ -35,7 +35,7 @@ class MCPToolProvider(ToolProvider):
     """Tool provider for MCP clients with managed lifecycle."""
 
     def __init__(
-        self, *, client: MCPClient, tool_filters: Optional[dict] = None, disambiguator: Optional[str] = None
+        self, *, client: MCPClient, tool_filters: Optional[ToolFilters] = None, disambiguator: Optional[str] = None
     ) -> None:
         """Initialize with an MCP client.
 

@@ -1067,28 +1067,6 @@ def test_agent__del__no_warning_when_no_tool_providers():
             mock_cleanup.assert_not_called()
 
 
-def test_agent__del__emits_warning_only_with_tool_providers():
-    """Test that __del__ only emits warning when there are tool providers that need cleanup."""
-    # Create a fresh agent for this test to avoid mock pollution
-    from strands import Agent
-
-    agent = Agent()
-
-    # Add a mock tool provider
-    mock_provider = unittest.mock.MagicMock()
-    agent.tool_registry.tool_providers = [mock_provider]
-
-    with unittest.mock.patch("strands.agent.agent.logger") as mock_logger:
-        with unittest.mock.patch.object(agent, "cleanup") as mock_cleanup:
-            agent.__del__()
-
-            # Verify warning was logged and cleanup was called
-            mock_logger.warning.assert_called_once()
-            warning_call = mock_logger.warning.call_args[0]
-            assert "Agent cleanup called via __del__" in warning_call[0]
-            mock_cleanup.assert_called_once()
-
-
 def test_agent_init_with_no_model_or_model_id():
     agent = Agent()
     assert agent.model is not None

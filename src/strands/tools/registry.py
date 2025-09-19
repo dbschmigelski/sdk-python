@@ -100,7 +100,7 @@ class ToolRegistry:
             elif isinstance(tool, ToolProvider):
                 self.tool_providers.append(tool)
 
-                provider_tools = run_async(lambda: tool.load_tools())
+                provider_tools = run_async(tool.load_tools)
 
                 for provider_tool in provider_tools:
                     self.register_tool(provider_tool)

@@ -1,6 +1,5 @@
 """Tests for _async module."""
 
-import asyncio
 import pytest
 
 from strands._async import run_async
