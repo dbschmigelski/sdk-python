@@ -14,35 +14,37 @@ from strands.tools.mcp import MCPClient
 from strands.types.exceptions import ToolProviderException
 
 import logging
+
 logging.basicConfig(level=logging.DEBUG)
 
 logger = logging.getLogger(__name__)
+
 
 def test_mcp_tool_provider_filters():
     """Test MCPToolProvider with various filter combinations."""
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="python", args=["tests_integ/echo_server.py"]))
     )
-    
+
     # Test string filter, regex filter, callable filter, max_tools, and disambiguator
     def short_names_only(tool) -> bool:
         return len(tool.tool_name) <= 20  # Allow most tools
-    
+
     filters: ToolFilters = {
         "allowed": ["echo", re.compile(r"echo_with_.*"), short_names_only],
         "rejected": ["echo_with_delay"],
-        "max_tools": 2
+        "max_tools": 2,
     }
-    
+
     provider = MCPToolProvider(client=stdio_mcp_client, tool_filters=filters, disambiguator="test")
     agent = Agent(tools=[provider])
     tool_names = agent.tool_names
-    
+
     # Should have 2 tools max, with test_ prefix, no delay tool
     assert len(tool_names) == 2
     assert "echo_with_delay" not in [name.replace("test_", "") for name in tool_names]
     assert all(name.startswith("test_") for name in tool_names)
-    
+
     agent.cleanup()
 
 
@@ -51,27 +53,27 @@ def test_mcp_tool_provider_execution():
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="python", args=["tests_integ/echo_server.py"]))
     )
-    
+
     filters: ToolFilters = {"allowed": ["echo"]}
     provider = MCPToolProvider(client=stdio_mcp_client, tool_filters=filters, disambiguator="filtered")
     agent = Agent(
         tools=[provider],
     )
-    
+
     # Verify the filtered tool exists
     assert "filtered_echo" in agent.tool_names
-    
+
     # # Test direct tool call to verify it works (use correct parameter name from echo server)
     tool_result = agent.tool.filtered_echo(to_echo="Hello World")
     assert "Hello World" in str(tool_result)
-    
+
     # # Test agent execution using the tool
     result = agent("Use the filtered_echo tool to echo whats inside the tags <>Integration Test</>")
     assert "Integration Test" in str(result)
 
-    assert agent.event_loop_metrics.tool_metrics['filtered_echo'].call_count == 1
-    assert agent.event_loop_metrics.tool_metrics['filtered_echo'].success_count == 1
-    
+    assert agent.event_loop_metrics.tool_metrics["filtered_echo"].call_count == 1
+    assert agent.event_loop_metrics.tool_metrics["filtered_echo"].success_count == 1
+
     agent.cleanup()
 
 
@@ -80,23 +82,23 @@ def test_mcp_tool_provider_cleanup_with_spy():
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="python", args=["tests_integ/echo_server.py"]))
     )
-    
+
     # Create spy to track client.stop calls
     original_stop = stdio_mcp_client.stop
     stop_calls = []
-    
+
     def spy_stop(*args, **kwargs):
         stop_calls.append((args, kwargs))
         return original_stop(*args, **kwargs)
-    
+
     stdio_mcp_client.stop = spy_stop
-    
+
     # Test explicit cleanup
     provider = MCPToolProvider(client=stdio_mcp_client)
     agent = Agent(tools=[provider])
     assert len(agent.tool_names) > 0
     assert provider._started
-    
+
     # Cleanup and verify spy recorded the call
     agent.cleanup()
     assert not provider._started
@@ -104,21 +106,21 @@ def test_mcp_tool_provider_cleanup_with_spy():
     assert len(stop_calls) == 1  # Verify stop was called exactly once
 
 
-@patch('strands.tools.mcp.mcp_client.MCPClient.stop')
+@patch("strands.tools.mcp.mcp_client.MCPClient.stop")
 def test_mcp_tool_provider_cleanup_with_mock(mock_stop):
     """Test MCPToolProvider cleanup using mock."""
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="python", args=["tests_integ/echo_server.py"]))
     )
-    
+
     provider = MCPToolProvider(client=stdio_mcp_client)
     agent = Agent(tools=[provider])
     assert len(agent.tool_names) > 0
     assert provider._started
-    
+
     # Cleanup
     agent.cleanup()
-    
+
     # Verify mock was called
     mock_stop.assert_called_once_with(None, None, None)
     assert not provider._started
@@ -130,30 +132,30 @@ def test_mcp_tool_provider_reuse():
     stdio_mcp_client = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="python", args=["tests_integ/echo_server.py"]))
     )
-    
+
     filters: ToolFilters = {"allowed": ["echo"]}
     provider = MCPToolProvider(client=stdio_mcp_client, tool_filters=filters, disambiguator="shared")
-    
+
     # Create first agent with the provider
     agent1 = Agent(tools=[provider])
     assert "shared_echo" in agent1.tool_names
-    
+
     # Test first agent (use correct parameter name from echo server)
     result1 = agent1.tool.shared_echo(to_echo="Agent 1")
     assert "Agent 1" in str(result1)
-    
+
     # Create second agent with the same provider
     agent2 = Agent(tools=[provider])
     assert "shared_echo" in agent2.tool_names
-    
+
     # Test second agent (use correct parameter name from echo server)
     result2 = agent2.tool.shared_echo(to_echo="Agent 2")
     assert "Agent 2" in str(result2)
-    
+
     # Both agents should have the same tool count
     assert len(agent1.tool_names) == len(agent2.tool_names)
     assert agent1.tool_names == agent2.tool_names
-    
+
     agent1.cleanup()
     agent2.cleanup()
 
@@ -167,27 +169,29 @@ def test_mcp_tool_provider_multiple_servers():
     client2 = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="python", args=["tests_integ/echo_server.py"]))
     )
-    
+
     # Create providers with different disambiguators
     provider1 = MCPToolProvider(client=client1, tool_filters={"allowed": ["echo"]}, disambiguator="server1")
     # Use correct tool name from echo_server.py
-    provider2 = MCPToolProvider(client=client2, tool_filters={"allowed": ["echo_with_structured_content"]}, disambiguator="server2")
-    
+    provider2 = MCPToolProvider(
+        client=client2, tool_filters={"allowed": ["echo_with_structured_content"]}, disambiguator="server2"
+    )
+
     # Create agent with both providers
     agent = Agent(tools=[provider1, provider2])
-    
+
     # Should have tools from both servers with different prefixes
     assert "server1_echo" in agent.tool_names
     assert "server2_echo_with_structured_content" in agent.tool_names
     assert len(agent.tool_names) == 2
-    
+
     # Test tools from both servers work
     result1 = agent.tool.server1_echo(to_echo="From Server 1")
     assert "From Server 1" in str(result1)
-    
+
     result2 = agent.tool.server2_echo_with_structured_content(to_echo="From Server 2")
     assert "From Server 2" in str(result2)
-    
+
     agent.cleanup()
 
 
@@ -196,11 +200,11 @@ def test_mcp_tool_provider_server_startup_failure():
     # Create client with invalid command that will fail to start
     failing_client = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="nonexistent_command", args=["--invalid"])),
-        startup_timeout=2  # Short timeout to avoid hanging
+        startup_timeout=2,  # Short timeout to avoid hanging
     )
-    
+
     provider = MCPToolProvider(client=failing_client)
-    
+
     # Should raise ToolProviderException when trying to load tools
     with pytest.raises(ToolProviderException, match="Failed to start MCP client"):
         Agent(tools=[provider])
@@ -211,11 +215,11 @@ def test_mcp_tool_provider_server_connection_timeout():
     # Create client that will hang during connection
     hanging_client = MCPClient(
         lambda: stdio_client(StdioServerParameters(command="sleep", args=["10"])),  # Sleep for 10 seconds
-        startup_timeout=1  # 1 second timeout
+        startup_timeout=1,  # 1 second timeout
     )
-    
+
     provider = MCPToolProvider(client=hanging_client)
-    
+
     # Should raise ToolProviderException due to timeout
     with pytest.raises(ToolProviderException, match="Failed to start MCP client"):
         Agent(tools=[provider])

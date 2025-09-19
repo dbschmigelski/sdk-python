@@ -892,13 +892,13 @@ def test_agent_cleanup(agent):
     # Create mock tool provider
     mock_provider = unittest.mock.MagicMock()
     mock_provider.cleanup = unittest.mock.AsyncMock()
-    
+
     # Add provider to agent's tool registry
     agent.tool_registry.tool_providers = [mock_provider]
-    
-    with unittest.mock.patch('strands.agent.agent.run_async') as mock_run_async:
+
+    with unittest.mock.patch("strands.agent.agent.run_async") as mock_run_async:
         agent.cleanup()
-        
+
         # Verify run_async was called once (for cleanup_async)
         mock_run_async.assert_called_once()
         # Get the function that was passed to run_async and verify it's cleanup_async
@@ -912,12 +912,12 @@ async def test_agent_cleanup_async(agent):
     # Create mock tool provider
     mock_provider = unittest.mock.MagicMock()
     mock_provider.cleanup = unittest.mock.AsyncMock()
-    
+
     # Add provider to agent's tool registry
     agent.tool_registry.tool_providers = [mock_provider]
-    
+
     await agent.cleanup_async()
-    
+
     # Verify provider cleanup was called
     mock_provider.cleanup.assert_called_once()
     # Verify cleanup was marked as called
@@ -932,13 +932,13 @@ async def test_agent_cleanup_async_handles_exceptions(agent):
     mock_provider1.cleanup = unittest.mock.AsyncMock()
     mock_provider2 = unittest.mock.MagicMock()
     mock_provider2.cleanup = unittest.mock.AsyncMock(side_effect=Exception("Cleanup failed"))
-    
+
     # Add providers to agent's tool registry
     agent.tool_registry.tool_providers = [mock_provider1, mock_provider2]
-    
+
     # Should not raise exception despite provider2 failing
     await agent.cleanup_async()
-    
+
     # Verify both providers were attempted
     mock_provider1.cleanup.assert_called_once()
     mock_provider2.cleanup.assert_called_once()
@@ -952,14 +952,14 @@ async def test_agent_cleanup_async_idempotent(agent):
     # Create mock tool provider
     mock_provider = unittest.mock.MagicMock()
     mock_provider.cleanup = unittest.mock.AsyncMock()
-    
+
     # Add provider to agent's tool registry
     agent.tool_registry.tool_providers = [mock_provider]
-    
+
     # Call cleanup_async twice
     await agent.cleanup_async()
     await agent.cleanup_async()
-    
+
     # Verify provider cleanup was only called once due to idempotency
     mock_provider.cleanup.assert_called_once()
 
@@ -969,10 +969,10 @@ async def test_agent_cleanup_async_with_no_providers(agent):
     """Test that agent cleanup_async works when there are no tool providers."""
     # Ensure no providers
     agent.tool_registry.tool_providers = []
-    
+
     # Should not raise any exceptions
     await agent.cleanup_async()
-    
+
     # Verify cleanup was marked as called
     assert agent._cleanup_called is True
 
@@ -984,13 +984,13 @@ def test_agent_cleanup_handles_exceptions(agent):
     mock_provider1.cleanup = unittest.mock.AsyncMock()
     mock_provider2 = unittest.mock.MagicMock()
     mock_provider2.cleanup = unittest.mock.AsyncMock(side_effect=Exception("Cleanup failed"))
-    
+
     # Add providers to agent's tool registry
     agent.tool_registry.tool_providers = [mock_provider1, mock_provider2]
-    
+
     # Should not raise exception despite provider2 failing
     agent.cleanup()
-    
+
     # Verify both providers were attempted
     mock_provider1.cleanup.assert_called_once()
     mock_provider2.cleanup.assert_called_once()
@@ -1000,7 +1000,7 @@ def test_agent_cleanup_with_no_providers(agent):
     """Test that agent cleanup works when there are no tool providers."""
     # Ensure no providers
     agent.tool_registry.tool_providers = []
-    
+
     # Should not raise any exceptions
     agent.cleanup()
 
@@ -1010,15 +1010,15 @@ def test_agent__del__(agent):
     # Add a mock tool provider so cleanup will be called
     mock_provider = unittest.mock.MagicMock()
     agent.tool_registry.tool_providers = [mock_provider]
-    
-    with unittest.mock.patch.object(agent, 'cleanup') as mock_cleanup:
+
+    with unittest.mock.patch.object(agent, "cleanup") as mock_cleanup:
         agent.__del__()
         mock_cleanup.assert_called_once()
 
 
 def test_agent__del__handles_cleanup_exception(agent):
     """Test that agent destructor handles cleanup exceptions."""
-    with unittest.mock.patch.object(agent, 'cleanup', side_effect=Exception("Cleanup failed")):
+    with unittest.mock.patch.object(agent, "cleanup", side_effect=Exception("Cleanup failed")):
         # Should not raise exception
         agent.__del__()
 
@@ -1028,14 +1028,14 @@ def test_agent_cleanup_idempotent(agent):
     # Create mock tool provider
     mock_provider = unittest.mock.MagicMock()
     mock_provider.cleanup = unittest.mock.AsyncMock()
-    
+
     # Add provider to agent's tool registry
     agent.tool_registry.tool_providers = [mock_provider]
-    
+
     # Call cleanup twice
     agent.cleanup()
     agent.cleanup()
-    
+
     # Verify provider cleanup was only called once due to idempotency
     mock_provider.cleanup.assert_called_once()
 
@@ -1045,11 +1045,11 @@ def test_agent__del__emits_warning_for_automatic_cleanup(agent):
     # Add a mock tool provider so cleanup will be called
     mock_provider = unittest.mock.MagicMock()
     agent.tool_registry.tool_providers = [mock_provider]
-    
-    with unittest.mock.patch('strands.agent.agent.logger') as mock_logger:
-        with unittest.mock.patch.object(agent, 'cleanup') as mock_cleanup:
+
+    with unittest.mock.patch("strands.agent.agent.logger") as mock_logger:
+        with unittest.mock.patch.object(agent, "cleanup") as mock_cleanup:
             agent.__del__()
-            
+
             # Verify warning was logged
             mock_logger.warning.assert_called_once()
             warning_call = mock_logger.warning.call_args[0]
@@ -1062,15 +1062,16 @@ def test_agent__del__no_warning_after_manual_cleanup():
     """Test that __del__ doesn't emit warning if cleanup was called manually."""
     # Create a fresh agent for this test
     from strands import Agent
+
     agent = Agent()
-    
+
     # Call cleanup manually first
-    with unittest.mock.patch.object(agent, 'cleanup_async') as mock_cleanup_async:
+    with unittest.mock.patch.object(agent, "cleanup_async") as mock_cleanup_async:
         agent.cleanup()
-    
-    with unittest.mock.patch('strands.agent.agent.logger') as mock_logger:
+
+    with unittest.mock.patch("strands.agent.agent.logger") as mock_logger:
         agent.__del__()
-        
+
         # Verify no warning was logged
         mock_logger.warning.assert_not_called()
 
@@ -1079,15 +1080,16 @@ def test_agent__del__no_warning_when_no_tool_providers():
     """Test that __del__ doesn't emit warning when there are no tool providers."""
     # Create a fresh agent for this test
     from strands import Agent
+
     agent = Agent()
-    
+
     # Ensure no tool providers
     agent.tool_registry.tool_providers = []
-    
-    with unittest.mock.patch('strands.agent.agent.logger') as mock_logger:
-        with unittest.mock.patch.object(agent, 'cleanup') as mock_cleanup:
+
+    with unittest.mock.patch("strands.agent.agent.logger") as mock_logger:
+        with unittest.mock.patch.object(agent, "cleanup") as mock_cleanup:
             agent.__del__()
-            
+
             # Verify no warning was logged and cleanup wasn't called
             mock_logger.warning.assert_not_called()
             mock_cleanup.assert_not_called()
@@ -1097,16 +1099,17 @@ def test_agent__del__emits_warning_only_with_tool_providers():
     """Test that __del__ only emits warning when there are tool providers that need cleanup."""
     # Create a fresh agent for this test to avoid mock pollution
     from strands import Agent
+
     agent = Agent()
-    
+
     # Add a mock tool provider
     mock_provider = unittest.mock.MagicMock()
     agent.tool_registry.tool_providers = [mock_provider]
-    
-    with unittest.mock.patch('strands.agent.agent.logger') as mock_logger:
-        with unittest.mock.patch.object(agent, 'cleanup') as mock_cleanup:
+
+    with unittest.mock.patch("strands.agent.agent.logger") as mock_logger:
+        with unittest.mock.patch.object(agent, "cleanup") as mock_cleanup:
             agent.__del__()
-            
+
             # Verify warning was logged and cleanup was called
             mock_logger.warning.assert_called_once()
             warning_call = mock_logger.warning.call_args[0]

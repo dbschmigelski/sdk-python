@@ -124,7 +124,9 @@ async def test_graph_execution_with_string(math_agent, summary_agent, validation
         builder.add_edge("computation_subgraph", "validator", condition=should_validate)  # Conditional edge
         builder.add_edge("secondary_math", "primary_summary")  # Agent -> Agent
         builder.add_edge("validator", "primary_summary")  # Agent -> Agent
-        builder.add_edge("primary_summary", "secondary_summary", condition=proceed_to_second_summary)  # Conditional (false)
+        builder.add_edge(
+            "primary_summary", "secondary_summary", condition=proceed_to_second_summary
+        )  # Conditional (false)
 
         builder.set_entry_point("computation_subgraph")
 

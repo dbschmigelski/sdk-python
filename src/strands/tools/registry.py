@@ -101,9 +101,9 @@ class ToolRegistry:
                 print("encountered tool provider 2")
                 logger.debug("encountered tool provider")
                 self.tool_providers.append(tool)
-                
+
                 provider_tools = run_async(lambda: tool.load_tools())
-                
+
                 for provider_tool in provider_tools:
                     self.register_tool(provider_tool)
                     tool_names.append(provider_tool.tool_name)
@@ -626,5 +626,3 @@ class ToolRegistry:
                     logger.warning("tool_name=<%s> | failed to create function tool | %s", name, e)
 
         return tools
-    
-

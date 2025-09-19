@@ -20,7 +20,7 @@ class TestEventLoopException:
         """Test initialization with only original exception."""
         original = ValueError("Original error")
         exception = EventLoopException(original)
-        
+
         assert exception.original_exception is original
         assert exception.request_state == {}
         assert str(exception) == "Original error"
@@ -30,7 +30,7 @@ class TestEventLoopException:
         original = ValueError("Original error")
         state = {"key": "value", "count": 42}
         exception = EventLoopException(original, state)
-        
+
         assert exception.original_exception is original
         assert exception.request_state == state
         assert str(exception) == "Original error"
@@ -39,7 +39,7 @@ class TestEventLoopException:
         """Test initialization with None request state."""
         original = ValueError("Original error")
         exception = EventLoopException(original, None)
-        
+
         assert exception.original_exception is original
         assert exception.request_state == {}
 
@@ -51,7 +51,7 @@ class TestMaxTokensReachedException:
         """Test initialization with message."""
         message = "Maximum tokens reached"
         exception = MaxTokensReachedException(message)
-        
+
         assert str(exception) == message
 
     def test_inheritance(self):
@@ -95,7 +95,7 @@ class TestModelThrottledException:
         """Test initialization with message."""
         message = "Model throttled"
         exception = ModelThrottledException(message)
-        
+
         assert exception.message == message
         assert str(exception) == message
 

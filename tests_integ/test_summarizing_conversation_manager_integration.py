@@ -177,7 +177,9 @@ def test_summarization_with_context_overflow(model):
         # Recent messages should be preserved - verify they're exactly the same
         recent_messages = agent.messages[-2:]  # Last 2 messages should be preserved
         assert len(recent_messages) == 2
-        assert recent_messages == messages_before_summary, "The last 2 messages should be preserved exactly as they were"
+        assert recent_messages == messages_before_summary, (
+            "The last 2 messages should be preserved exactly as they were"
+        )
 
         # Agent should still be functional after summarization
         post_summary_result = agent("That's very interesting, thank you!")
@@ -234,11 +236,15 @@ def test_tool_preservation_during_summarization(model, tools):
             {"role": "user", "content": [{"text": "What's 25 + 37?"}]},
             {
                 "role": "assistant",
-                "content": [{"toolUse": {"toolUseId": "calc_001", "name": "calculate_sum", "input": {"a": 25, "b": 37}}}],
+                "content": [
+                    {"toolUse": {"toolUseId": "calc_001", "name": "calculate_sum", "input": {"a": 25, "b": 37}}}
+                ],
             },
             {
                 "role": "user",
-                "content": [{"toolResult": {"toolUseId": "calc_001", "content": [{"text": "62"}], "status": "success"}}],
+                "content": [
+                    {"toolResult": {"toolUseId": "calc_001", "content": [{"text": "62"}], "status": "success"}}
+                ],
             },
             {"role": "assistant", "content": [{"text": "25 + 37 = 62"}]},
             # Weather query with tool use/result pair

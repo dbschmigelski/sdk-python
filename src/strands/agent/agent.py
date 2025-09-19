@@ -329,7 +329,7 @@ class Agent:
                 raise ValueError("state must be an AgentState object or a dict")
         else:
             self.state = AgentState()
-        
+
         # Track cleanup state
         self._cleanup_called = False
 
@@ -513,55 +513,62 @@ class Agent:
 
             finally:
                 self.hooks.invoke_callbacks(AfterInvocationEvent(agent=self))
-    
+
     def cleanup(self) -> None:
         """Clean up resources used by the agent.
-        
+
         This method cleans up all tool providers that require explicit cleanup,
         such as MCP clients. It should be called when the agent is no longer needed
         to ensure proper resource cleanup.
-        
+
         Note: This method uses a "belt and braces" approach with automatic cleanup
         through __del__ as a fallback, but explicit cleanup is recommended.
         """
         run_async(self.cleanup_async)
-    
+
     async def cleanup_async(self) -> None:
         """Asynchronously clean up resources used by the agent.
-        
+
         This method cleans up all tool providers that require explicit cleanup,
         such as MCP clients. It should be called when the agent is no longer needed
         to ensure proper resource cleanup.
-        
+
         Note: This method uses a "belt and braces" approach with automatic cleanup
         through __del__ as a fallback, but explicit cleanup is recommended.
         """
         if self._cleanup_called:
             return
-            
+
         logger.debug("agent_id=<%s> | cleaning up agent resources", self.agent_id)
-        
+
         for provider in self.tool_registry.tool_providers:
             try:
                 await provider.cleanup()
-                logger.debug("agent_id=<%s>, provider=<%s> | cleaned up tool provider", 
-                           self.agent_id, type(provider).__name__)
+                logger.debug(
+                    "agent_id=<%s>, provider=<%s> | cleaned up tool provider", self.agent_id, type(provider).__name__
+                )
             except Exception as e:
-                logger.warning("agent_id=<%s>, provider=<%s>, error=<%s> | failed to cleanup tool provider", 
-                             self.agent_id, type(provider).__name__, e)
-        
+                logger.warning(
+                    "agent_id=<%s>, provider=<%s>, error=<%s> | failed to cleanup tool provider",
+                    self.agent_id,
+                    type(provider).__name__,
+                    e,
+                )
+
         self._cleanup_called = True
         logger.debug("agent_id=<%s> | agent cleanup complete", self.agent_id)
-    
+
     def __del__(self) -> None:
         """Automatic cleanup when agent is garbage collected.
-        
+
         This serves as a fallback cleanup mechanism, but explicit cleanup() is preferred.
         """
         try:
             if not self._cleanup_called and self.tool_registry.tool_providers:
-                logger.warning("agent_id=<%s> | Agent cleanup called via __del__. Consider calling agent.cleanup() explicitly for better resource management.", 
-                             self.agent_id)
+                logger.warning(
+                    "agent_id=<%s> | Agent cleanup called via __del__. Consider calling agent.cleanup() explicitly for better resource management.",
+                    self.agent_id,
+                )
                 self.cleanup()
         except Exception:
             # Silently ignore exceptions during garbage collection cleanup

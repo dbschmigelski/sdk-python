@@ -19,9 +19,6 @@ from ..types.tools import AgentTool, ToolFunc, ToolGenerator, ToolSpec, ToolUse
 logger = logging.getLogger(__name__)
 
 
-
-
-
 class InvalidToolUseNameException(Exception):
     """Exception raised when a tool use has an invalid name."""
 
