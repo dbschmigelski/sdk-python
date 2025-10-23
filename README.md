@@ -21,6 +21,9 @@
     <a href="https://pypi.org/project/strands-agents/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/strands-agents"/></a>
     <a href="https://python.org"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/strands-agents"/></a>
   </div>
+
+
+
   
   <p>
     <a href="https://strandsagents.com/">Documentation</a>
@@ -89,6 +92,17 @@ def word_count(text: str) -> int:
 
 agent = Agent(tools=[word_count])
 response = agent("How many words are in this sentence?")
+```
+
+**Hot Reloading from Directory:**
+Enable automatic tool loading and reloading from the `./tools/` directory:
+
+```python
+from strands import Agent
+
+# Agent will watch ./tools/ directory for changes
+agent = Agent(load_tools_from_directory=True)
+response = agent("Use any tools you find in the tools directory")
 ```
 
 ### MCP Support

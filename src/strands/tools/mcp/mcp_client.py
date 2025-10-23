@@ -20,15 +20,16 @@ from typing import Any, Callable, Coroutine, Dict, Optional, TypeVar, Union
 
 from mcp import ClientSession, ListToolsResult
 from mcp.types import CallToolResult as MCPCallToolResult
+from mcp.types import GetPromptResult, ListPromptsResult
 from mcp.types import ImageContent as MCPImageContent
 from mcp.types import TextContent as MCPTextContent
 
 from ...types import PaginatedList
 from ...types.exceptions import MCPClientInitializationError
 from ...types.media import ImageFormat
-from ...types.tools import ToolResult, ToolResultContent, ToolResultStatus
+from ...types.tools import ToolResultContent, ToolResultStatus
 from .mcp_agent_tool import MCPAgentTool
-from .mcp_types import MCPTransport
+from .mcp_types import MCPToolResult, MCPTransport
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +58,8 @@ class MCPClient:
     It handles the creation, initialization, and cleanup of MCP connections.
 
     The connection runs in a background thread to avoid blocking the main application thread
-    while maintaining communication with the MCP service.
+    while maintaining communication with the MCP service. When structured content is available
+    from MCP tools, it will be returned as the last item in the content array of the ToolResult.
     """
 
     def __init__(self, transport_callable: Callable[[], MCPTransport]):
@@ -164,17 +166,67 @@ class MCPClient:
         self._log_debug_with_thread("successfully adapted %d MCP tools", len(mcp_tools))
         return PaginatedList[MCPAgentTool](mcp_tools, token=list_tools_response.nextCursor)
 
+    def list_prompts_sync(self, pagination_token: Optional[str] = None) -> ListPromptsResult:
+        """Synchronously retrieves the list of available prompts from the MCP server.
+
+        This method calls the asynchronous list_prompts method on the MCP session
+        and returns the raw ListPromptsResult with pagination support.
+
+        Args:
+            pagination_token: Optional token for pagination
+
+        Returns:
+            ListPromptsResult: The raw MCP response containing prompts and pagination info
+        """
+        self._log_debug_with_thread("listing MCP prompts synchronously")
+        if not self._is_session_active():
+            raise MCPClientInitializationError(CLIENT_SESSION_NOT_RUNNING_ERROR_MESSAGE)
+
+        async def _list_prompts_async() -> ListPromptsResult:
+            return await self._background_thread_session.list_prompts(cursor=pagination_token)
+
+        list_prompts_result: ListPromptsResult = self._invoke_on_background_thread(_list_prompts_async()).result()
+        self._log_debug_with_thread("received %d prompts from MCP server", len(list_prompts_result.prompts))
+        for prompt in list_prompts_result.prompts:
+            self._log_debug_with_thread(prompt.name)
+
+        return list_prompts_result
+
+    def get_prompt_sync(self, prompt_id: str, args: dict[str, Any]) -> GetPromptResult:
+        """Synchronously retrieves a prompt from the MCP server.
+
+        Args:
+            prompt_id: The ID of the prompt to retrieve
+            args: Optional arguments to pass to the prompt
+
+        Returns:
+            GetPromptResult: The prompt response from the MCP server
+        """
+        self._log_debug_with_thread("getting MCP prompt synchronously")
+        if not self._is_session_active():
+            raise MCPClientInitializationError(CLIENT_SESSION_NOT_RUNNING_ERROR_MESSAGE)
+
+        async def _get_prompt_async() -> GetPromptResult:
+            return await self._background_thread_session.get_prompt(prompt_id, arguments=args)
+
+        get_prompt_result: GetPromptResult = self._invoke_on_background_thread(_get_prompt_async()).result()
+        self._log_debug_with_thread("received prompt from MCP server")
+
+        return get_prompt_result
+
     def call_tool_sync(
         self,
         tool_use_id: str,
         name: str,
         arguments: dict[str, Any] | None = None,
         read_timeout_seconds: timedelta | None = None,
-    ) -> ToolResult:
+    ) -> MCPToolResult:
         """Synchronously calls a tool on the MCP server.
 
         This method calls the asynchronous call_tool method on the MCP session
-        and converts the result to the ToolResult format.
+        and converts the result to the ToolResult format. If the MCP tool returns
+        structured content, it will be included as the last item in the content array
+        of the returned ToolResult.
 
         Args:
             tool_use_id: Unique identifier for this tool use
@@ -183,7 +235,7 @@ class MCPClient:
             read_timeout_seconds: Optional timeout for the tool call
 
         Returns:
-            ToolResult: The result of the tool call
+            MCPToolResult: The result of the tool call
         """
         self._log_debug_with_thread("calling MCP tool '%s' synchronously with tool_use_id=%s", name, tool_use_id)
         if not self._is_session_active():
@@ -205,11 +257,11 @@ class MCPClient:
         name: str,
         arguments: dict[str, Any] | None = None,
         read_timeout_seconds: timedelta | None = None,
-    ) -> ToolResult:
+    ) -> MCPToolResult:
         """Asynchronously calls a tool on the MCP server.
 
         This method calls the asynchronous call_tool method on the MCP session
-        and converts the result to the ToolResult format.
+        and converts the result to the MCPToolResult format.
 
         Args:
             tool_use_id: Unique identifier for this tool use
@@ -218,7 +270,7 @@ class MCPClient:
             read_timeout_seconds: Optional timeout for the tool call
 
         Returns:
-            ToolResult: The result of the tool call
+            MCPToolResult: The result of the tool call
         """
         self._log_debug_with_thread("calling MCP tool '%s' asynchronously with tool_use_id=%s", name, tool_use_id)
         if not self._is_session_active():
@@ -235,15 +287,27 @@ class MCPClient:
             logger.exception("tool execution failed")
             return self._handle_tool_execution_error(tool_use_id, e)
 
-    def _handle_tool_execution_error(self, tool_use_id: str, exception: Exception) -> ToolResult:
+    def _handle_tool_execution_error(self, tool_use_id: str, exception: Exception) -> MCPToolResult:
         """Create error ToolResult with consistent logging."""
-        return ToolResult(
+        return MCPToolResult(
             status="error",
             toolUseId=tool_use_id,
             content=[{"text": f"Tool execution failed: {str(exception)}"}],
         )
 
-    def _handle_tool_result(self, tool_use_id: str, call_tool_result: MCPCallToolResult) -> ToolResult:
+    def _handle_tool_result(self, tool_use_id: str, call_tool_result: MCPCallToolResult) -> MCPToolResult:
+        """Maps MCP tool result to the agent's MCPToolResult format.
+
+        This method processes the content from the MCP tool call result and converts it to the format
+        expected by the framework.
+
+        Args:
+            tool_use_id: Unique identifier for this tool use
+            call_tool_result: The result from the MCP tool call
+
+        Returns:
+            MCPToolResult: The converted tool result
+        """
         self._log_debug_with_thread("received tool result with %d content items", len(call_tool_result.content))
 
         mapped_content = [
@@ -254,7 +318,15 @@ class MCPClient:
 
         status: ToolResultStatus = "error" if call_tool_result.isError else "success"
         self._log_debug_with_thread("tool execution completed with status: %s", status)
-        return ToolResult(status=status, toolUseId=tool_use_id, content=mapped_content)
+        result = MCPToolResult(
+            status=status,
+            toolUseId=tool_use_id,
+            content=mapped_content,
+        )
+        if call_tool_result.structuredContent:
+            result["structuredContent"] = call_tool_result.structuredContent
+
+        return result
 
     async def _async_background_thread(self) -> None:
         """Asynchronous method that runs in the background thread to manage the MCP connection.
