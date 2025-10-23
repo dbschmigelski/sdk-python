@@ -13,13 +13,26 @@ import asyncio
 import json
 import logging
 import random
+import warnings
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, AsyncGenerator, AsyncIterator, Callable, Mapping, Optional, Type, TypeVar, Union, cast
+from typing import (
+    Any,
+    AsyncGenerator,
+    AsyncIterator,
+    Callable,
+    Mapping,
+    Optional,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 from opentelemetry import trace as trace_api
 from pydantic import BaseModel
 
-from ..event_loop.event_loop import event_loop_cycle, run_tool
+from .. import _identifier
+from ..event_loop.event_loop import event_loop_cycle
 from ..handlers.callback_handler import PrintingCallbackHandler, null_callback_handler
 from ..hooks import (
     AfterInvocationEvent,
@@ -33,11 +46,17 @@ from ..models.bedrock import BedrockModel
 from ..models.model import Model
 from ..session.session_manager import SessionManager
 from ..telemetry.metrics import EventLoopMetrics
-from ..telemetry.tracer import get_tracer
+from ..telemetry.tracer import get_tracer, serialize
+from ..tools.executors import ConcurrentToolExecutor
+from ..tools.executors._executor import ToolExecutor
 from ..tools.registry import ToolRegistry
+from ..tools.structured_output._structured_output_context import StructuredOutputContext
 from ..tools.watcher import ToolWatcher
+from ..types._events import AgentResultEvent, InitEventLoopEvent, ModelStreamChunkEvent, TypedEvent
+from ..types.agent import AgentInput
 from ..types.content import ContentBlock, Message, Messages
 from ..types.exceptions import ContextWindowOverflowException
+from ..types.interrupt import InterruptResponseContent
 from ..types.tools import ToolResult, ToolUse
 from ..types.traces import AttributeValue
 from .agent_result import AgentResult
@@ -45,6 +64,7 @@ from .conversation_manager import (
     ConversationManager,
     SlidingWindowConversationManager,
 )
+from .interrupt import InterruptState
 from .state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -126,6 +146,9 @@ class Agent:
                 Raises:
                     AttributeError: If the tool doesn't exist.
                 """
+                if self._agent._interrupt_state.activated:
+                    raise RuntimeError("cannot directly call tool during interrupt")
+
                 normalized_name = self._find_normalized_tool_name(name)
 
                 # Create unique tool ID and set up the tool request
@@ -135,13 +158,14 @@ class Agent:
                     "name": normalized_name,
                     "input": kwargs.copy(),
                 }
+                tool_results: list[ToolResult] = []
+                invocation_state = kwargs
 
                 async def acall() -> ToolResult:
-                    # Pass kwargs as invocation_state
-                    async for event in run_tool(self._agent, tool_use, kwargs):
+                    async for event in ToolExecutor._stream(self._agent, tool_use, tool_results, invocation_state):
                         _ = event
 
-                    return cast(ToolResult, event)
+                    return tool_results[0]
 
                 def tcall() -> ToolResult:
                     return asyncio.run(acall())
@@ -193,6 +217,7 @@ class Agent:
         messages: Optional[Messages] = None,
         tools: Optional[list[Union[str, dict[str, str], Any]]] = None,
         system_prompt: Optional[str] = None,
+        structured_output_model: Optional[Type[BaseModel]] = None,
         callback_handler: Optional[
             Union[Callable[..., Any], _DefaultCallbackHandlerSentinel]
         ] = _DEFAULT_CALLBACK_HANDLER,
@@ -207,6 +232,7 @@ class Agent:
         state: Optional[Union[AgentState, dict]] = None,
         hooks: Optional[list[HookProvider]] = None,
         session_manager: Optional[SessionManager] = None,
+        tool_executor: Optional[ToolExecutor] = None,
     ):
         """Initialize the Agent with the specified configuration.
 
@@ -227,6 +253,10 @@ class Agent:
                 If provided, only these tools will be available. If None, all tools will be available.
             system_prompt: System prompt to guide model behavior.
                 If None, the model will behave according to its default settings.
+            structured_output_model: Pydantic model type(s) for structured output.
+                When specified, all agent calls will attempt to return structured output of this type.
+                This can be overridden on the agent invocation.
+                Defaults to None (no structured output).
             callback_handler: Callback for processing events as they happen during agent execution.
                 If not provided (using the default), a new PrintingCallbackHandler instance is created.
                 If explicitly set to None, null_callback_handler is used.
@@ -249,12 +279,16 @@ class Agent:
                 Defaults to None.
             session_manager: Manager for handling agent sessions including conversation history and state.
                 If provided, enables session-based persistence and state management.
+            tool_executor: Definition of tool execution stragety (e.g., sequential, concurrent, etc.).
+
+        Raises:
+            ValueError: If agent id contains path separators.
         """
         self.model = BedrockModel() if not model else BedrockModel(model_id=model) if isinstance(model, str) else model
         self.messages = messages if messages is not None else []
-
         self.system_prompt = system_prompt
-        self.agent_id = agent_id or _DEFAULT_AGENT_ID
+        self._default_structured_output_model = structured_output_model
+        self.agent_id = _identifier.validate(agent_id or _DEFAULT_AGENT_ID, _identifier.Identifier.AGENT)
         self.name = name or _DEFAULT_AGENT_NAME
         self.description = description
 
@@ -315,10 +349,14 @@ class Agent:
 
         self.hooks = HookRegistry()
 
+        self._interrupt_state = InterruptState()
+
         # Initialize session management functionality
         self._session_manager = session_manager
         if self._session_manager:
             self.hooks.add_hook(self._session_manager)
+
+        self.tool_executor = tool_executor or ConcurrentToolExecutor()
 
         if hooks:
             for hook in hooks:
@@ -350,15 +388,31 @@ class Agent:
         all_tools = self.tool_registry.get_all_tools_config()
         return list(all_tools.keys())
 
-    def __call__(self, prompt: Union[str, list[ContentBlock]], **kwargs: Any) -> AgentResult:
+    def __call__(
+        self,
+        prompt: AgentInput = None,
+        *,
+        invocation_state: dict[str, Any] | None = None,
+        structured_output_model: Type[BaseModel] | None = None,
+        **kwargs: Any,
+    ) -> AgentResult:
         """Process a natural language prompt through the agent's event loop.
 
-        This method implements the conversational interface (e.g., `agent("hello!")`). It adds the user's prompt to
-        the conversation history, processes it through the model, executes any tool calls, and returns the final result.
+        This method implements the conversational interface with multiple input patterns:
+        - String input: `agent("hello!")`
+        - ContentBlock list: `agent([{"text": "hello"}, {"image": {...}}])`
+        - Message list: `agent([{"role": "user", "content": [{"text": "hello"}]}])`
+        - No input: `agent()` - uses existing conversation history
 
         Args:
-            prompt: User input as text or list of ContentBlock objects for multi-modal content.
-            **kwargs: Additional parameters to pass through the event loop.
+            prompt: User input in various formats:
+                - str: Simple text input
+                - list[ContentBlock]: Multi-modal content blocks
+                - list[Message]: Complete messages with roles
+                - None: Use existing conversation history
+            invocation_state: Additional parameters to pass through the event loop.
+            structured_output_model: Pydantic model type(s) for structured output (overrides agent default).
+            **kwargs: Additional parameters to pass through the event loop.[Deprecating]
 
         Returns:
             Result object containing:
@@ -367,44 +421,67 @@ class Agent:
                 - message: The final message from the model
                 - metrics: Performance metrics from the event loop
                 - state: The final state of the event loop
+                - structured_output: Parsed structured output when structured_output_model was specified
         """
 
         def execute() -> AgentResult:
-            return asyncio.run(self.invoke_async(prompt, **kwargs))
+            return asyncio.run(
+                self.invoke_async(
+                    prompt, invocation_state=invocation_state, structured_output_model=structured_output_model, **kwargs
+                )
+            )
 
         with ThreadPoolExecutor() as executor:
             future = executor.submit(execute)
             return future.result()
 
-    async def invoke_async(self, prompt: Union[str, list[ContentBlock]], **kwargs: Any) -> AgentResult:
+    async def invoke_async(
+        self,
+        prompt: AgentInput = None,
+        *,
+        invocation_state: dict[str, Any] | None = None,
+        structured_output_model: Type[BaseModel] | None = None,
+        **kwargs: Any,
+    ) -> AgentResult:
         """Process a natural language prompt through the agent's event loop.
 
-        This method implements the conversational interface (e.g., `agent("hello!")`). It adds the user's prompt to
-        the conversation history, processes it through the model, executes any tool calls, and returns the final result.
+        This method implements the conversational interface with multiple input patterns:
+        - String input: Simple text input
+        - ContentBlock list: Multi-modal content blocks
+        - Message list: Complete messages with roles
+        - No input: Use existing conversation history
 
         Args:
-            prompt: User input as text or list of ContentBlock objects for multi-modal content.
-            **kwargs: Additional parameters to pass through the event loop.
+            prompt: User input in various formats:
+                - str: Simple text input
+                - list[ContentBlock]: Multi-modal content blocks
+                - list[Message]: Complete messages with roles
+                - None: Use existing conversation history
+            invocation_state: Additional parameters to pass through the event loop.
+            structured_output_model: Pydantic model type(s) for structured output (overrides agent default).
+            **kwargs: Additional parameters to pass through the event loop.[Deprecating]
 
         Returns:
-            Result object containing:
+            Result: object containing:
 
                 - stop_reason: Why the event loop stopped (e.g., "end_turn", "max_tokens")
                 - message: The final message from the model
                 - metrics: Performance metrics from the event loop
                 - state: The final state of the event loop
         """
-        events = self.stream_async(prompt, **kwargs)
+        events = self.stream_async(
+            prompt, invocation_state=invocation_state, structured_output_model=structured_output_model, **kwargs
+        )
         async for event in events:
             _ = event
 
         return cast(AgentResult, event["result"])
 
-    def structured_output(self, output_model: Type[T], prompt: Optional[Union[str, list[ContentBlock]]] = None) -> T:
+    def structured_output(self, output_model: Type[T], prompt: AgentInput = None) -> T:
         """This method allows you to get structured output from the agent.
 
-        If you pass in a prompt, it will be added to the conversation history and the agent will respond to it.
-        If you don't pass in a prompt, it will use only the conversation history to respond.
+        If you pass in a prompt, it will be used temporarily without adding it to the conversation history.
+        If you don't pass in a prompt, it will use only the existing conversation history to respond.
 
         For smaller models, you may want to use the optional prompt to add additional instructions to explicitly
         instruct the model to output the structured data.
@@ -412,11 +489,22 @@ class Agent:
         Args:
             output_model: The output model (a JSON schema written as a Pydantic BaseModel)
                 that the agent will use when responding.
-            prompt: The prompt to use for the agent.
+            prompt: The prompt to use for the agent in various formats:
+                - str: Simple text input
+                - list[ContentBlock]: Multi-modal content blocks
+                - list[Message]: Complete messages with roles
+                - None: Use existing conversation history
 
         Raises:
             ValueError: If no conversation history or prompt is provided.
         """
+        warnings.warn(
+            "Agent.structured_output method is deprecated."
+            " You should pass in `structured_output_model` directly into the agent invocation."
+            " see: https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/structured-output/",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
 
         def execute() -> T:
             return asyncio.run(self.structured_output_async(output_model, prompt))
@@ -425,13 +513,11 @@ class Agent:
             future = executor.submit(execute)
             return future.result()
 
-    async def structured_output_async(
-        self, output_model: Type[T], prompt: Optional[Union[str, list[ContentBlock]]] = None
-    ) -> T:
+    async def structured_output_async(self, output_model: Type[T], prompt: AgentInput = None) -> T:
         """This method allows you to get structured output from the agent.
 
-        If you pass in a prompt, it will be added to the conversation history and the agent will respond to it.
-        If you don't pass in a prompt, it will use only the conversation history to respond.
+        If you pass in a prompt, it will be used temporarily without adding it to the conversation history.
+        If you don't pass in a prompt, it will use only the existing conversation history to respond.
 
         For smaller models, you may want to use the optional prompt to add additional instructions to explicitly
         instruct the model to output the structured data.
@@ -439,52 +525,98 @@ class Agent:
         Args:
             output_model: The output model (a JSON schema written as a Pydantic BaseModel)
                 that the agent will use when responding.
-            prompt: The prompt to use for the agent.
+            prompt: The prompt to use for the agent (will not be added to conversation history).
 
         Raises:
             ValueError: If no conversation history or prompt is provided.
         """
+        if self._interrupt_state.activated:
+            raise RuntimeError("cannot call structured output during interrupt")
+
+        warnings.warn(
+            "Agent.structured_output_async method is deprecated."
+            " You should pass in `structured_output_model` directly into the agent invocation."
+            " see: https://strandsagents.com/latest/documentation/docs/user-guide/concepts/agents/structured-output/",
+            category=DeprecationWarning,
+            stacklevel=2,
+        )
         self.hooks.invoke_callbacks(BeforeInvocationEvent(agent=self))
+        with self.tracer.tracer.start_as_current_span(
+            "execute_structured_output", kind=trace_api.SpanKind.CLIENT
+        ) as structured_output_span:
+            try:
+                if not self.messages and not prompt:
+                    raise ValueError("No conversation history or prompt provided")
 
-        try:
-            if not self.messages and not prompt:
-                raise ValueError("No conversation history or prompt provided")
+                temp_messages: Messages = self.messages + self._convert_prompt_to_messages(prompt)
 
-            # add the prompt as the last message
-            if prompt:
-                content: list[ContentBlock] = [{"text": prompt}] if isinstance(prompt, str) else prompt
-                self._append_message({"role": "user", "content": content})
+                structured_output_span.set_attributes(
+                    {
+                        "gen_ai.system": "strands-agents",
+                        "gen_ai.agent.name": self.name,
+                        "gen_ai.agent.id": self.agent_id,
+                        "gen_ai.operation.name": "execute_structured_output",
+                    }
+                )
+                if self.system_prompt:
+                    structured_output_span.add_event(
+                        "gen_ai.system.message",
+                        attributes={"role": "system", "content": serialize([{"text": self.system_prompt}])},
+                    )
+                for message in temp_messages:
+                    structured_output_span.add_event(
+                        f"gen_ai.{message['role']}.message",
+                        attributes={"role": message["role"], "content": serialize(message["content"])},
+                    )
+                events = self.model.structured_output(output_model, temp_messages, system_prompt=self.system_prompt)
+                async for event in events:
+                    if isinstance(event, TypedEvent):
+                        event.prepare(invocation_state={})
+                        if event.is_callback_event:
+                            self.callback_handler(**event.as_dict())
 
-            events = self.model.structured_output(output_model, self.messages, system_prompt=self.system_prompt)
-            async for event in events:
-                if "callback" in event:
-                    self.callback_handler(**cast(dict, event["callback"]))
+                structured_output_span.add_event(
+                    "gen_ai.choice", attributes={"message": serialize(event["output"].model_dump())}
+                )
+                return event["output"]
 
-            return event["output"]
+            finally:
+                self.hooks.invoke_callbacks(AfterInvocationEvent(agent=self))
 
-        finally:
-            self.hooks.invoke_callbacks(AfterInvocationEvent(agent=self))
-
-    async def stream_async(self, prompt: Union[str, list[ContentBlock]], **kwargs: Any) -> AsyncIterator[Any]:
+    async def stream_async(
+        self,
+        prompt: AgentInput = None,
+        *,
+        invocation_state: dict[str, Any] | None = None,
+        structured_output_model: Type[BaseModel] | None = None,
+        **kwargs: Any,
+    ) -> AsyncIterator[Any]:
         """Process a natural language prompt and yield events as an async iterator.
 
-        This method provides an asynchronous interface for streaming agent events, allowing
-        consumers to process stream events programmatically through an async iterator pattern
-        rather than callback functions. This is particularly useful for web servers and other
-        async environments.
+        This method provides an asynchronous interface for streaming agent events with multiple input patterns:
+        - String input: Simple text input
+        - ContentBlock list: Multi-modal content blocks
+        - Message list: Complete messages with roles
+        - No input: Use existing conversation history
 
         Args:
-            prompt: User input as text or list of ContentBlock objects for multi-modal content.
-            **kwargs: Additional parameters to pass to the event loop.
+            prompt: User input in various formats:
+                - str: Simple text input
+                - list[ContentBlock]: Multi-modal content blocks
+                - list[Message]: Complete messages with roles
+                - None: Use existing conversation history
+            invocation_state: Additional parameters to pass through the event loop.
+            structured_output_model: Pydantic model type(s) for structured output (overrides agent default).
+            **kwargs: Additional parameters to pass to the event loop.[Deprecating]
 
         Yields:
             An async iterator that yields events. Each event is a dictionary containing
-            information about the current state of processing, such as:
+               information about the current state of processing, such as:
 
-            - data: Text content being generated
-            - complete: Whether this is the final chunk
-            - current_tool_use: Information about tools being executed
-            - And other event data provided by the callback handler
+                - data: Text content being generated
+                - complete: Whether this is the final chunk
+                - current_tool_use: Information about tools being executed
+                - And other event data provided by the callback handler
 
         Raises:
             Exception: Any exceptions from the agent invocation will be propagated to the caller.
@@ -496,23 +628,42 @@ class Agent:
                     yield event["data"]
             ```
         """
-        callback_handler = kwargs.get("callback_handler", self.callback_handler)
+        self._resume_interrupt(prompt)
 
-        content: list[ContentBlock] = [{"text": prompt}] if isinstance(prompt, str) else prompt
-        message: Message = {"role": "user", "content": content}
+        merged_state = {}
+        if kwargs:
+            warnings.warn("`**kwargs` parameter is deprecating, use `invocation_state` instead.", stacklevel=2)
+            merged_state.update(kwargs)
+            if invocation_state is not None:
+                merged_state["invocation_state"] = invocation_state
+        else:
+            if invocation_state is not None:
+                merged_state = invocation_state
 
-        self.trace_span = self._start_agent_trace_span(message)
+        callback_handler = self.callback_handler
+        if kwargs:
+            callback_handler = kwargs.get("callback_handler", self.callback_handler)
+
+        # Process input and get message to add (if any)
+        messages = self._convert_prompt_to_messages(prompt)
+
+        self.trace_span = self._start_agent_trace_span(messages)
+
         with trace_api.use_span(self.trace_span):
             try:
-                events = self._run_loop(message, invocation_state=kwargs)
+                events = self._run_loop(messages, merged_state, structured_output_model)
+
                 async for event in events:
-                    if "callback" in event:
-                        callback_handler(**event["callback"])
-                        yield event["callback"]
+                    event.prepare(invocation_state=merged_state)
+
+                    if event.is_callback_event:
+                        as_dict = event.as_dict()
+                        callback_handler(**as_dict)
+                        yield as_dict
 
                 result = AgentResult(*event["stop"])
                 callback_handler(result=result)
-                yield {"result": result}
+                yield AgentResultEvent(result=result).as_dict()
 
                 self._end_agent_trace_span(response=result)
 
@@ -520,14 +671,50 @@ class Agent:
                 self._end_agent_trace_span(error=e)
                 raise
 
+    def _resume_interrupt(self, prompt: AgentInput) -> None:
+        """Configure the interrupt state if resuming from an interrupt event.
+
+        Args:
+            prompt: User responses if resuming from interrupt.
+
+        Raises:
+            TypeError: If in interrupt state but user did not provide responses.
+        """
+        if not self._interrupt_state.activated:
+            return
+
+        if not isinstance(prompt, list):
+            raise TypeError(f"prompt_type={type(prompt)} | must resume from interrupt with list of interruptResponse's")
+
+        invalid_types = [
+            content_type for content in prompt for content_type in content if content_type != "interruptResponse"
+        ]
+        if invalid_types:
+            raise TypeError(
+                f"content_types=<{invalid_types}> | must resume from interrupt with list of interruptResponse's"
+            )
+
+        for content in cast(list[InterruptResponseContent], prompt):
+            interrupt_id = content["interruptResponse"]["interruptId"]
+            interrupt_response = content["interruptResponse"]["response"]
+
+            if interrupt_id not in self._interrupt_state.interrupts:
+                raise KeyError(f"interrupt_id=<{interrupt_id}> | no interrupt found")
+
+            self._interrupt_state.interrupts[interrupt_id].response = interrupt_response
+
     async def _run_loop(
-        self, message: Message, invocation_state: dict[str, Any]
-    ) -> AsyncGenerator[dict[str, Any], None]:
+        self,
+        messages: Messages,
+        invocation_state: dict[str, Any],
+        structured_output_model: Type[BaseModel] | None = None,
+    ) -> AsyncGenerator[TypedEvent, None]:
         """Execute the agent's event loop with the given message and parameters.
 
         Args:
-            message: The user message to add to the conversation.
+            messages: The input messages to add to the conversation.
             invocation_state: Additional parameters to pass to the event loop.
+            structured_output_model: Optional Pydantic model type for structured output.
 
         Yields:
             Events from the event loop cycle.
@@ -535,23 +722,28 @@ class Agent:
         self.hooks.invoke_callbacks(BeforeInvocationEvent(agent=self))
 
         try:
-            yield {"callback": {"init_event_loop": True, **invocation_state}}
+            yield InitEventLoopEvent()
 
-            self._append_message(message)
+            for message in messages:
+                self._append_message(message)
+
+            structured_output_context = StructuredOutputContext(
+                structured_output_model or self._default_structured_output_model
+            )
 
             # Execute the event loop cycle with retry logic for context limits
-            events = self._execute_event_loop_cycle(invocation_state)
+            events = self._execute_event_loop_cycle(invocation_state, structured_output_context)
             async for event in events:
                 # Signal from the model provider that the message sent by the user should be redacted,
                 # likely due to a guardrail.
                 if (
-                    event.get("callback")
-                    and event["callback"].get("event")
-                    and event["callback"]["event"].get("redactContent")
-                    and event["callback"]["event"]["redactContent"].get("redactUserContentMessage")
+                    isinstance(event, ModelStreamChunkEvent)
+                    and event.chunk
+                    and event.chunk.get("redactContent")
+                    and event.chunk["redactContent"].get("redactUserContentMessage")
                 ):
                     self.messages[-1]["content"] = [
-                        {"text": event["callback"]["event"]["redactContent"]["redactUserContentMessage"]}
+                        {"text": str(event.chunk["redactContent"]["redactUserContentMessage"])}
                     ]
                     if self._session_manager:
                         self._session_manager.redact_latest_message(self.messages[-1], self)
@@ -561,12 +753,18 @@ class Agent:
             self.conversation_manager.apply_management(self)
             self.hooks.invoke_callbacks(AfterInvocationEvent(agent=self))
 
-    async def _execute_event_loop_cycle(self, invocation_state: dict[str, Any]) -> AsyncGenerator[dict[str, Any], None]:
+    async def _execute_event_loop_cycle(
+        self, invocation_state: dict[str, Any], structured_output_context: StructuredOutputContext | None = None
+    ) -> AsyncGenerator[TypedEvent, None]:
         """Execute the event loop cycle with retry logic for context window limits.
 
         This internal method handles the execution of the event loop cycle and implements
         retry logic for handling context window overflow exceptions by reducing the
         conversation context and retrying.
+
+        Args:
+            invocation_state: Additional parameters to pass to the event loop.
+            structured_output_context: Optional structured output context for this invocation.
 
         Yields:
             Events of the loop cycle.
@@ -574,11 +772,14 @@ class Agent:
         # Add `Agent` to invocation_state to keep backwards-compatibility
         invocation_state["agent"] = self
 
+        if structured_output_context:
+            structured_output_context.register_tool(self.tool_registry)
+
         try:
-            # Execute the main event loop cycle
             events = event_loop_cycle(
                 agent=self,
                 invocation_state=invocation_state,
+                structured_output_context=structured_output_context,
             )
             async for event in events:
                 yield event
@@ -591,9 +792,44 @@ class Agent:
             if self._session_manager:
                 self._session_manager.sync_agent(self)
 
-            events = self._execute_event_loop_cycle(invocation_state)
+            events = self._execute_event_loop_cycle(invocation_state, structured_output_context)
             async for event in events:
                 yield event
+
+        finally:
+            if structured_output_context:
+                structured_output_context.cleanup(self.tool_registry)
+
+    def _convert_prompt_to_messages(self, prompt: AgentInput) -> Messages:
+        if self._interrupt_state.activated:
+            return []
+
+        messages: Messages | None = None
+        if prompt is not None:
+            if isinstance(prompt, str):
+                # String input - convert to user message
+                messages = [{"role": "user", "content": [{"text": prompt}]}]
+            elif isinstance(prompt, list):
+                if len(prompt) == 0:
+                    # Empty list
+                    messages = []
+                # Check if all item in input list are dictionaries
+                elif all(isinstance(item, dict) for item in prompt):
+                    # Check if all items are messages
+                    if all(all(key in item for key in Message.__annotations__.keys()) for item in prompt):
+                        # Messages input - add all messages to conversation
+                        messages = cast(Messages, prompt)
+
+                    # Check if all items are content blocks
+                    elif all(any(key in ContentBlock.__annotations__.keys() for key in item) for item in prompt):
+                        # Treat as List[ContentBlock] input - convert to user message
+                        # This allows invalid structures to be passed through to the model
+                        messages = [{"role": "user", "content": cast(list[ContentBlock], prompt)}]
+        else:
+            messages = []
+        if messages is None:
+            raise ValueError("Input prompt must be of type: `str | list[Contentblock] | Messages | None`.")
+        return messages
 
     def _record_tool_execution(
         self,
@@ -615,8 +851,11 @@ class Agent:
             tool_result: The result returned by the tool.
             user_message_override: Optional custom message to include.
         """
+        # Filter tool input parameters to only include those defined in tool spec
+        filtered_input = self._filter_tool_parameters_for_recording(tool["name"], tool["input"])
+
         # Create user message describing the tool call
-        input_parameters = json.dumps(tool["input"], default=lambda o: f"<<non-serializable: {type(o).__qualname__}>>")
+        input_parameters = json.dumps(filtered_input, default=lambda o: f"<<non-serializable: {type(o).__qualname__}>>")
 
         user_msg_content: list[ContentBlock] = [
             {"text": (f"agent.tool.{tool['name']} direct tool call.\nInput parameters: {input_parameters}\n")}
@@ -626,6 +865,13 @@ class Agent:
         if user_message_override:
             user_msg_content.insert(0, {"text": f"{user_message_override}\n"})
 
+        # Create filtered tool use for message history
+        filtered_tool: ToolUse = {
+            "toolUseId": tool["toolUseId"],
+            "name": tool["name"],
+            "input": filtered_input,
+        }
+
         # Create the message sequence
         user_msg: Message = {
             "role": "user",
@@ -633,7 +879,7 @@ class Agent:
         }
         tool_use_msg: Message = {
             "role": "assistant",
-            "content": [{"toolUse": tool}],
+            "content": [{"toolUse": filtered_tool}],
         }
         tool_result_msg: Message = {
             "role": "user",
@@ -650,15 +896,15 @@ class Agent:
         self._append_message(tool_result_msg)
         self._append_message(assistant_msg)
 
-    def _start_agent_trace_span(self, message: Message) -> trace_api.Span:
+    def _start_agent_trace_span(self, messages: Messages) -> trace_api.Span:
         """Starts a trace span for the agent.
 
         Args:
-            message: The user message.
+            messages: The input messages.
         """
         model_id = self.model.config.get("model_id") if hasattr(self.model, "config") else None
         return self.tracer.start_agent_span(
-            message=message,
+            messages=messages,
             agent_name=self.name,
             model_id=model_id,
             tools=self.tool_names,
@@ -689,6 +935,25 @@ class Agent:
                 trace_attributes["error"] = error
 
             self.tracer.end_agent_span(**trace_attributes)
+
+    def _filter_tool_parameters_for_recording(self, tool_name: str, input_params: dict[str, Any]) -> dict[str, Any]:
+        """Filter input parameters to only include those defined in the tool specification.
+
+        Args:
+            tool_name: Name of the tool to get specification for
+            input_params: Original input parameters
+
+        Returns:
+            Filtered parameters containing only those defined in tool spec
+        """
+        all_tools_config = self.tool_registry.get_all_tools_config()
+        tool_spec = all_tools_config.get(tool_name)
+
+        if not tool_spec or "inputSchema" not in tool_spec:
+            return input_params.copy()
+
+        properties = tool_spec["inputSchema"]["json"]["properties"]
+        return {k: v for k, v in input_params.items() if k in properties}
 
     def _append_message(self, message: Message) -> None:
         """Appends a message to the agent's list of messages and invokes the callbacks for the MessageCreatedEvent."""

@@ -7,6 +7,7 @@ import shutil
 import tempfile
 from typing import Any, Optional, cast
 
+from .. import _identifier
 from ..types.exceptions import SessionException
 from ..types.session import Session, SessionAgent, SessionMessage
 from .repository_session_manager import RepositorySessionManager
@@ -23,6 +24,7 @@ class FileSessionManager(RepositorySessionManager, SessionRepository):
     """File-based session manager for local filesystem storage.
 
     Creates the following filesystem structure for the session storage:
+    ```bash
     /<sessions_dir>/
     └── session_<session_id>/
         ├── session.json                # Session metadata
@@ -32,15 +34,16 @@ class FileSessionManager(RepositorySessionManager, SessionRepository):
                 └── messages/
                     ├── message_<id1>.json
                     └── message_<id2>.json
-
+    ```
     """
 
     def __init__(self, session_id: str, storage_dir: Optional[str] = None, **kwargs: Any):
         """Initialize FileSession with filesystem storage.
 
         Args:
-            session_id: ID for the session
-            storage_dir: Directory for local filesystem storage (defaults to temp dir)
+            session_id: ID for the session.
+                ID is not allowed to contain path separators (e.g., a/b).
+            storage_dir: Directory for local filesystem storage (defaults to temp dir).
             **kwargs: Additional keyword arguments for future extensibility.
         """
         self.storage_dir = storage_dir or os.path.join(tempfile.gettempdir(), "strands/sessions")
@@ -49,12 +52,29 @@ class FileSessionManager(RepositorySessionManager, SessionRepository):
         super().__init__(session_id=session_id, session_repository=self)
 
     def _get_session_path(self, session_id: str) -> str:
-        """Get session directory path."""
+        """Get session directory path.
+
+        Args:
+            session_id: ID for the session.
+
+        Raises:
+            ValueError: If session id contains a path separator.
+        """
+        session_id = _identifier.validate(session_id, _identifier.Identifier.SESSION)
         return os.path.join(self.storage_dir, f"{SESSION_PREFIX}{session_id}")
 
     def _get_agent_path(self, session_id: str, agent_id: str) -> str:
-        """Get agent directory path."""
+        """Get agent directory path.
+
+        Args:
+            session_id: ID for the session.
+            agent_id: ID for the agent.
+
+        Raises:
+            ValueError: If session id or agent id contains a path separator.
+        """
         session_path = self._get_session_path(session_id)
+        agent_id = _identifier.validate(agent_id, _identifier.Identifier.AGENT)
         return os.path.join(session_path, "agents", f"{AGENT_PREFIX}{agent_id}")
 
     def _get_message_path(self, session_id: str, agent_id: str, message_id: int) -> str:
@@ -66,7 +86,13 @@ class FileSessionManager(RepositorySessionManager, SessionRepository):
             message_id: Index of the message
         Returns:
             The filename for the message
+
+        Raises:
+            ValueError: If message_id is not an integer.
         """
+        if not isinstance(message_id, int):
+            raise ValueError(f"message_id=<{message_id}> | message id must be an integer")
+
         agent_path = self._get_agent_path(session_id, agent_id)
         return os.path.join(agent_path, "messages", f"{MESSAGE_PREFIX}{message_id}.json")
 

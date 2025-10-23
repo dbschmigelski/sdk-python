@@ -8,6 +8,7 @@ import boto3
 from botocore.config import Config as BotocoreConfig
 from botocore.exceptions import ClientError
 
+from .. import _identifier
 from ..types.exceptions import SessionException
 from ..types.session import Session, SessionAgent, SessionMessage
 from .repository_session_manager import RepositorySessionManager
@@ -24,6 +25,7 @@ class S3SessionManager(RepositorySessionManager, SessionRepository):
     """S3-based session manager for cloud storage.
 
     Creates the following filesystem structure for the session storage:
+    ```bash
     /<sessions_dir>/
     └── session_<session_id>/
         ├── session.json                # Session metadata
@@ -33,7 +35,7 @@ class S3SessionManager(RepositorySessionManager, SessionRepository):
                 └── messages/
                     ├── message_<id1>.json
                     └── message_<id2>.json
-
+    ```
     """
 
     def __init__(
@@ -50,6 +52,7 @@ class S3SessionManager(RepositorySessionManager, SessionRepository):
 
         Args:
             session_id: ID for the session
+                ID is not allowed to contain path separators (e.g., a/b).
             bucket: S3 bucket name (required)
             prefix: S3 key prefix for storage organization
             boto_session: Optional boto3 session
@@ -78,12 +81,29 @@ class S3SessionManager(RepositorySessionManager, SessionRepository):
         super().__init__(session_id=session_id, session_repository=self)
 
     def _get_session_path(self, session_id: str) -> str:
-        """Get session S3 prefix."""
+        """Get session S3 prefix.
+
+        Args:
+            session_id: ID for the session.
+
+        Raises:
+            ValueError: If session id contains a path separator.
+        """
+        session_id = _identifier.validate(session_id, _identifier.Identifier.SESSION)
         return f"{self.prefix}/{SESSION_PREFIX}{session_id}/"
 
     def _get_agent_path(self, session_id: str, agent_id: str) -> str:
-        """Get agent S3 prefix."""
+        """Get agent S3 prefix.
+
+        Args:
+            session_id: ID for the session.
+            agent_id: ID for the agent.
+
+        Raises:
+            ValueError: If session id or agent id contains a path separator.
+        """
         session_path = self._get_session_path(session_id)
+        agent_id = _identifier.validate(agent_id, _identifier.Identifier.AGENT)
         return f"{session_path}agents/{AGENT_PREFIX}{agent_id}/"
 
     def _get_message_path(self, session_id: str, agent_id: str, message_id: int) -> str:
@@ -93,11 +113,16 @@ class S3SessionManager(RepositorySessionManager, SessionRepository):
             session_id: ID of the session
             agent_id: ID of the agent
             message_id: Index of the message
-            **kwargs: Additional keyword arguments for future extensibility.
 
         Returns:
             The key for the message
+
+        Raises:
+            ValueError: If message_id is not an integer.
         """
+        if not isinstance(message_id, int):
+            raise ValueError(f"message_id=<{message_id}> | message id must be an integer")
+
         agent_path = self._get_agent_path(session_id, agent_id)
         return f"{agent_path}messages/{MESSAGE_PREFIX}{message_id}.json"
 

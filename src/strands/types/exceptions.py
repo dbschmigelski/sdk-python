@@ -18,6 +18,23 @@ class EventLoopException(Exception):
         super().__init__(str(original_exception))
 
 
+class MaxTokensReachedException(Exception):
+    """Exception raised when the model reaches its maximum token generation limit.
+
+    This exception is raised when the model stops generating tokens because it has reached the maximum number of
+    tokens allowed for output generation. This can occur when the model's max_tokens parameter is set too low for
+    the complexity of the response, or when the model naturally reaches its configured output limit during generation.
+    """
+
+    def __init__(self, message: str):
+        """Initialize the exception with an error message and the incomplete message object.
+
+        Args:
+            message: The error message describing the token limit issue
+        """
+        super().__init__(message)
+
+
 class ContextWindowOverflowException(Exception):
     """Exception raised when the context window is exceeded.
 
@@ -58,3 +75,16 @@ class SessionException(Exception):
     """Exception raised when session operations fail."""
 
     pass
+
+
+class StructuredOutputException(Exception):
+    """Exception raised when structured output validation fails after maximum retry attempts."""
+
+    def __init__(self, message: str):
+        """Initialize the exception with details about the failure.
+
+        Args:
+            message: The error message describing the structured output failure
+        """
+        self.message = message
+        super().__init__(message)

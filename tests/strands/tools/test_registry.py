@@ -26,7 +26,10 @@ def test_process_tools_with_invalid_path():
     tool_registry = ToolRegistry()
     invalid_path = "not a filepath"
 
-    with pytest.raises(ValueError, match=f"Failed to load tool {invalid_path.split('.')[0]}: Tool file not found:.*"):
+    with pytest.raises(
+        ValueError,
+        match=f'Failed to load tool {invalid_path}: Tool string: "{invalid_path}" is not a valid tool string',
+    ):
         tool_registry.process_tools([invalid_path])
 
 
@@ -93,3 +96,167 @@ def test_scan_module_for_tools():
 
     assert len(tools) == 2
     assert all(isinstance(tool, DecoratedFunctionTool) for tool in tools)
+
+
+def test_process_tools_flattens_lists_and_tuples_and_sets():
+    def function() -> str:
+        return "done"
+
+    tool_a = tool(name="tool_a")(function)
+    tool_b = tool(name="tool_b")(function)
+    tool_c = tool(name="tool_c")(function)
+    tool_d = tool(name="tool_d")(function)
+    tool_e = tool(name="tool_e")(function)
+    tool_f = tool(name="tool_f")(function)
+
+    registry = ToolRegistry()
+
+    all_tools = [tool_a, (tool_b, tool_c), [{tool_d, tool_e}, [tool_f]]]
+
+    tru_tool_names = sorted(registry.process_tools(all_tools))
+    exp_tool_names = [
+        "tool_a",
+        "tool_b",
+        "tool_c",
+        "tool_d",
+        "tool_e",
+        "tool_f",
+    ]
+    assert tru_tool_names == exp_tool_names
+
+
+def test_register_tool_duplicate_name_without_hot_reload():
+    """Test that registering a tool with duplicate name raises ValueError when hot reload is not supported."""
+    # Create mock tools that don't support hot reload
+    tool_1 = MagicMock()
+    tool_1.tool_name = "duplicate_tool"
+    tool_1.supports_hot_reload = False
+    tool_1.is_dynamic = False
+
+    tool_2 = MagicMock()
+    tool_2.tool_name = "duplicate_tool"
+    tool_2.supports_hot_reload = False
+    tool_2.is_dynamic = False
+
+    tool_registry = ToolRegistry()
+    tool_registry.register_tool(tool_1)
+
+    with pytest.raises(
+        ValueError, match="Tool name 'duplicate_tool' already exists. Cannot register tools with exact same name."
+    ):
+        tool_registry.register_tool(tool_2)
+
+
+def test_register_tool_duplicate_name_with_hot_reload():
+    """Test that registering a tool with duplicate name succeeds when hot reload is supported."""
+    # Create mock tools with hot reload support
+    tool_1 = MagicMock(spec=PythonAgentTool)
+    tool_1.tool_name = "hot_reload_tool"
+    tool_1.supports_hot_reload = True
+    tool_1.is_dynamic = False
+
+    tool_2 = MagicMock(spec=PythonAgentTool)
+    tool_2.tool_name = "hot_reload_tool"
+    tool_2.supports_hot_reload = True
+    tool_2.is_dynamic = False
+
+    tool_registry = ToolRegistry()
+    tool_registry.register_tool(tool_1)
+
+    tool_registry.register_tool(tool_2)
+
+    # Verify the second tool replaced the first
+    assert tool_registry.registry["hot_reload_tool"] == tool_2
+
+
+def test_register_strands_tools_from_module():
+    tool_registry = ToolRegistry()
+    tool_registry.process_tools(["tests.fixtures.say_tool"])
+
+    assert len(tool_registry.registry) == 2
+    assert "say" in tool_registry.registry
+    assert "dont_say" in tool_registry.registry
+
+
+def test_register_strands_tools_specific_tool_from_module():
+    tool_registry = ToolRegistry()
+    tool_registry.process_tools(["tests.fixtures.say_tool:say"])
+
+    assert len(tool_registry.registry) == 1
+    assert "say" in tool_registry.registry
+    assert "dont_say" not in tool_registry.registry
+
+
+def test_register_strands_tools_specific_tool_from_module_tool_missing():
+    tool_registry = ToolRegistry()
+
+    with pytest.raises(ValueError, match="Failed to load tool tests.fixtures.say_tool:nay: "):
+        tool_registry.process_tools(["tests.fixtures.say_tool:nay"])
+
+
+def test_register_strands_tools_specific_tool_from_module_not_a_tool():
+    tool_registry = ToolRegistry()
+
+    with pytest.raises(ValueError, match="Failed to load tool tests.fixtures.say_tool:not_a_tool: "):
+        tool_registry.process_tools(["tests.fixtures.say_tool:not_a_tool"])
+
+
+def test_register_strands_tools_with_dict():
+    tool_registry = ToolRegistry()
+    tool_registry.process_tools([{"path": "tests.fixtures.say_tool"}])
+
+    assert len(tool_registry.registry) == 2
+    assert "say" in tool_registry.registry
+    assert "dont_say" in tool_registry.registry
+
+
+def test_register_strands_tools_specific_tool_with_dict():
+    tool_registry = ToolRegistry()
+    tool_registry.process_tools([{"path": "tests.fixtures.say_tool", "name": "say"}])
+
+    assert len(tool_registry.registry) == 1
+    assert "say" in tool_registry.registry
+
+
+def test_register_strands_tools_specific_tool_with_dict_not_found():
+    tool_registry = ToolRegistry()
+
+    with pytest.raises(
+        ValueError,
+        match="Failed to load tool {'path': 'tests.fixtures.say_tool'"
+        ", 'name': 'nay'}: Tool \"nay\" not found in \"tests.fixtures.say_tool\"",
+    ):
+        tool_registry.process_tools([{"path": "tests.fixtures.say_tool", "name": "nay"}])
+
+
+def test_register_strands_tools_module_no_spec():
+    tool_registry = ToolRegistry()
+
+    with pytest.raises(
+        ValueError,
+        match="Failed to load tool tests.fixtures.mocked_model_provider: "
+        "The module mocked_model_provider is not a valid module",
+    ):
+        tool_registry.process_tools(["tests.fixtures.mocked_model_provider"])
+
+
+def test_register_strands_tools_module_no_function():
+    tool_registry = ToolRegistry()
+
+    with pytest.raises(
+        ValueError,
+        match="Failed to load tool tests.fixtures.tool_with_spec_but_no_function: "
+        "Module-based tool tool_with_spec_but_no_function missing function tool_with_spec_but_no_function",
+    ):
+        tool_registry.process_tools(["tests.fixtures.tool_with_spec_but_no_function"])
+
+
+def test_register_strands_tools_module_non_callable_function():
+    tool_registry = ToolRegistry()
+
+    with pytest.raises(
+        ValueError,
+        match="Failed to load tool tests.fixtures.tool_with_spec_but_non_callable_function:"
+        " Tool tool_with_spec_but_non_callable_function function is not callable",
+    ):
+        tool_registry.process_tools(["tests.fixtures.tool_with_spec_but_non_callable_function"])

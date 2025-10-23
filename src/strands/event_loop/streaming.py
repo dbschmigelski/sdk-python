@@ -2,9 +2,23 @@
 
 import json
 import logging
+import time
 from typing import Any, AsyncGenerator, AsyncIterable, Optional
 
 from ..models.model import Model
+from ..types._events import (
+    CitationStreamEvent,
+    ModelStopReason,
+    ModelStreamChunkEvent,
+    ModelStreamEvent,
+    ReasoningRedactedContentStreamEvent,
+    ReasoningSignatureStreamEvent,
+    ReasoningTextStreamEvent,
+    TextStreamEvent,
+    ToolUseStreamEvent,
+    TypedEvent,
+)
+from ..types.citations import CitationsContentBlock
 from ..types.content import ContentBlock, Message, Messages
 from ..types.streaming import (
     ContentBlockDeltaEvent,
@@ -40,10 +54,12 @@ def remove_blank_messages_content_text(messages: Messages) -> Messages:
         # only modify assistant messages
         if "role" in message and message["role"] != "assistant":
             continue
-
         if "content" in message:
             content = message["content"]
             has_tool_use = any("toolUse" in item for item in content)
+            if len(content) == 0:
+                content.append({"text": "[blank text]"})
+                continue
 
             if has_tool_use:
                 # Remove blank 'text' items for assistant messages
@@ -103,7 +119,7 @@ def handle_content_block_start(event: ContentBlockStartEvent) -> dict[str, Any]:
 
 def handle_content_block_delta(
     event: ContentBlockDeltaEvent, state: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> tuple[dict[str, Any], ModelStreamEvent]:
     """Handles content block delta updates by appending text, tool input, or reasoning content to the state.
 
     Args:
@@ -115,18 +131,25 @@ def handle_content_block_delta(
     """
     delta_content = event["delta"]
 
-    callback_event = {}
+    typed_event: ModelStreamEvent = ModelStreamEvent({})
 
     if "toolUse" in delta_content:
         if "input" not in state["current_tool_use"]:
             state["current_tool_use"]["input"] = ""
 
         state["current_tool_use"]["input"] += delta_content["toolUse"]["input"]
-        callback_event["callback"] = {"delta": delta_content, "current_tool_use": state["current_tool_use"]}
+        typed_event = ToolUseStreamEvent(delta_content, state["current_tool_use"])
 
     elif "text" in delta_content:
         state["text"] += delta_content["text"]
-        callback_event["callback"] = {"data": delta_content["text"], "delta": delta_content}
+        typed_event = TextStreamEvent(text=delta_content["text"], delta=delta_content)
+
+    elif "citation" in delta_content:
+        if "citationsContent" not in state:
+            state["citationsContent"] = []
+
+        state["citationsContent"].append(delta_content["citation"])
+        typed_event = CitationStreamEvent(delta=delta_content, citation=delta_content["citation"])
 
     elif "reasoningContent" in delta_content:
         if "text" in delta_content["reasoningContent"]:
@@ -134,24 +157,26 @@ def handle_content_block_delta(
                 state["reasoningText"] = ""
 
             state["reasoningText"] += delta_content["reasoningContent"]["text"]
-            callback_event["callback"] = {
-                "reasoningText": delta_content["reasoningContent"]["text"],
-                "delta": delta_content,
-                "reasoning": True,
-            }
+            typed_event = ReasoningTextStreamEvent(
+                reasoning_text=delta_content["reasoningContent"]["text"],
+                delta=delta_content,
+            )
 
         elif "signature" in delta_content["reasoningContent"]:
             if "signature" not in state:
                 state["signature"] = ""
 
             state["signature"] += delta_content["reasoningContent"]["signature"]
-            callback_event["callback"] = {
-                "reasoning_signature": delta_content["reasoningContent"]["signature"],
-                "delta": delta_content,
-                "reasoning": True,
-            }
+            typed_event = ReasoningSignatureStreamEvent(
+                reasoning_signature=delta_content["reasoningContent"]["signature"],
+                delta=delta_content,
+            )
 
-    return state, callback_event
+        elif redacted_content := delta_content["reasoningContent"].get("redactedContent"):
+            state["redactedContent"] = state.get("redactedContent", b"") + redacted_content
+            typed_event = ReasoningRedactedContentStreamEvent(redacted_content=redacted_content, delta=delta_content)
+
+    return state, typed_event
 
 
 def handle_content_block_stop(state: dict[str, Any]) -> dict[str, Any]:
@@ -168,6 +193,8 @@ def handle_content_block_stop(state: dict[str, Any]) -> dict[str, Any]:
     current_tool_use = state["current_tool_use"]
     text = state["text"]
     reasoning_text = state["reasoningText"]
+    citations_content = state["citationsContent"]
+    redacted_content = state.get("redactedContent")
 
     if current_tool_use:
         if "input" not in current_tool_use:
@@ -192,19 +219,28 @@ def handle_content_block_stop(state: dict[str, Any]) -> dict[str, Any]:
     elif text:
         content.append({"text": text})
         state["text"] = ""
+        if citations_content:
+            citations_block: CitationsContentBlock = {"citations": citations_content}
+            content.append({"citationsContent": citations_block})
+            state["citationsContent"] = []
 
     elif reasoning_text:
-        content.append(
-            {
-                "reasoningContent": {
-                    "reasoningText": {
-                        "text": state["reasoningText"],
-                        "signature": state["signature"],
-                    }
+        content_block: ContentBlock = {
+            "reasoningContent": {
+                "reasoningText": {
+                    "text": state["reasoningText"],
                 }
             }
-        )
+        }
+
+        if "signature" in state:
+            content_block["reasoningContent"]["reasoningText"]["signature"] = state["signature"]
+
+        content.append(content_block)
         state["reasoningText"] = ""
+    elif redacted_content:
+        content.append({"reasoningContent": {"redactedContent": redacted_content}})
+        state["redactedContent"] = b""
 
     return state
 
@@ -232,64 +268,77 @@ def handle_redact_content(event: RedactContentEvent, state: dict[str, Any]) -> N
         state["message"]["content"] = [{"text": event["redactAssistantContentMessage"]}]
 
 
-def extract_usage_metrics(event: MetadataEvent) -> tuple[Usage, Metrics]:
+def extract_usage_metrics(event: MetadataEvent, time_to_first_byte_ms: int | None = None) -> tuple[Usage, Metrics]:
     """Extracts usage metrics from the metadata chunk.
 
     Args:
         event: metadata.
+        time_to_first_byte_ms: time to get the first byte from the model in milliseconds
 
     Returns:
         The extracted usage metrics and latency.
     """
     usage = Usage(**event["usage"])
     metrics = Metrics(**event["metrics"])
+    if time_to_first_byte_ms:
+        metrics["timeToFirstByteMs"] = time_to_first_byte_ms
 
     return usage, metrics
 
 
-async def process_stream(chunks: AsyncIterable[StreamEvent]) -> AsyncGenerator[dict[str, Any], None]:
+async def process_stream(
+    chunks: AsyncIterable[StreamEvent], start_time: float | None = None
+) -> AsyncGenerator[TypedEvent, None]:
     """Processes the response stream from the API, constructing the final message and extracting usage metrics.
 
     Args:
         chunks: The chunks of the response stream from the model.
+        start_time: Time when the model request is initiated
 
     Yields:
         The reason for stopping, the constructed message, and the usage metrics.
     """
     stop_reason: StopReason = "end_turn"
+    first_byte_time = None
 
     state: dict[str, Any] = {
         "message": {"role": "assistant", "content": []},
         "text": "",
         "current_tool_use": {},
         "reasoningText": "",
-        "signature": "",
+        "citationsContent": [],
     }
     state["content"] = state["message"]["content"]
 
     usage: Usage = Usage(inputTokens=0, outputTokens=0, totalTokens=0)
-    metrics: Metrics = Metrics(latencyMs=0)
+    metrics: Metrics = Metrics(latencyMs=0, timeToFirstByteMs=0)
 
     async for chunk in chunks:
-        yield {"callback": {"event": chunk}}
+        # Track first byte time when we get first content
+        if first_byte_time is None and ("contentBlockDelta" in chunk or "contentBlockStart" in chunk):
+            first_byte_time = time.time()
+        yield ModelStreamChunkEvent(chunk=chunk)
 
         if "messageStart" in chunk:
             state["message"] = handle_message_start(chunk["messageStart"], state["message"])
         elif "contentBlockStart" in chunk:
             state["current_tool_use"] = handle_content_block_start(chunk["contentBlockStart"])
         elif "contentBlockDelta" in chunk:
-            state, callback_event = handle_content_block_delta(chunk["contentBlockDelta"], state)
-            yield callback_event
+            state, typed_event = handle_content_block_delta(chunk["contentBlockDelta"], state)
+            yield typed_event
         elif "contentBlockStop" in chunk:
             state = handle_content_block_stop(state)
         elif "messageStop" in chunk:
             stop_reason = handle_message_stop(chunk["messageStop"])
         elif "metadata" in chunk:
-            usage, metrics = extract_usage_metrics(chunk["metadata"])
+            time_to_first_byte_ms = (
+                int(1000 * (first_byte_time - start_time)) if (start_time and first_byte_time) else None
+            )
+            usage, metrics = extract_usage_metrics(chunk["metadata"], time_to_first_byte_ms)
         elif "redactContent" in chunk:
             handle_redact_content(chunk["redactContent"], state)
 
-    yield {"stop": (stop_reason, state["message"], usage, metrics)}
+    yield ModelStopReason(stop_reason=stop_reason, message=state["message"], usage=usage, metrics=metrics)
 
 
 async def stream_messages(
@@ -297,7 +346,8 @@ async def stream_messages(
     system_prompt: Optional[str],
     messages: Messages,
     tool_specs: list[ToolSpec],
-) -> AsyncGenerator[dict[str, Any], None]:
+    tool_choice: Optional[Any] = None,
+) -> AsyncGenerator[TypedEvent, None]:
     """Streams messages to the model and processes the response.
 
     Args:
@@ -305,6 +355,7 @@ async def stream_messages(
         system_prompt: The system prompt to send.
         messages: List of messages to send.
         tool_specs: The list of tool specs.
+        tool_choice: Optional tool choice constraint for forcing specific tool usage.
 
     Yields:
         The reason for stopping, the final message, and the usage metrics
@@ -312,8 +363,8 @@ async def stream_messages(
     logger.debug("model=<%s> | streaming messages", model)
 
     messages = remove_blank_messages_content_text(messages)
+    start_time = time.time()
+    chunks = model.stream(messages, tool_specs if tool_specs else None, system_prompt, tool_choice=tool_choice)
 
-    chunks = model.stream(messages, tool_specs if tool_specs else None, system_prompt)
-
-    async for event in process_stream(chunks):
+    async for event in process_stream(chunks, start_time):
         yield event

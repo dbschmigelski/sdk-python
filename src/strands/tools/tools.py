@@ -12,6 +12,7 @@ from typing import Any
 
 from typing_extensions import override
 
+from ..types._events import ToolResultEvent
 from ..types.tools import AgentTool, ToolFunc, ToolGenerator, ToolSpec, ToolUse
 
 logger = logging.getLogger(__name__)
@@ -189,6 +190,15 @@ class PythonAgentTool(AgentTool):
         return self._tool_spec
 
     @property
+    def supports_hot_reload(self) -> bool:
+        """Check if this tool supports automatic reloading when modified.
+
+        Returns:
+            Always true for function-based tools.
+        """
+        return True
+
+    @property
     def tool_type(self) -> str:
         """Identifies this as a Python-based tool implementation.
 
@@ -211,7 +221,7 @@ class PythonAgentTool(AgentTool):
         """
         if inspect.iscoroutinefunction(self._tool_func):
             result = await self._tool_func(tool_use, **invocation_state)
+            yield ToolResultEvent(result)
         else:
             result = await asyncio.to_thread(self._tool_func, tool_use, **invocation_state)
-
-        yield result
+            yield ToolResultEvent(result)

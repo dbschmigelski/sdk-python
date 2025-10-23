@@ -53,7 +53,11 @@ class MockedModelProvider(Model):
         pass
 
     async def stream(
-        self, messages: Messages, tool_specs: Optional[list[ToolSpec]] = None, system_prompt: Optional[str] = None
+        self,
+        messages: Messages,
+        tool_specs: Optional[list[ToolSpec]] = None,
+        system_prompt: Optional[str] = None,
+        tool_choice: Optional[Any] = None,
     ) -> AsyncGenerator[Any, None]:
         events = self.map_agent_message_to_events(self.agent_responses[self.index])
         for event in events:
@@ -72,6 +76,10 @@ class MockedModelProvider(Model):
             stop_reason = "guardrail_intervened"
         else:
             for content in agent_message["content"]:
+                if "reasoningContent" in content:
+                    yield {"contentBlockStart": {"start": {}}}
+                    yield {"contentBlockDelta": {"delta": {"reasoningContent": content["reasoningContent"]}}}
+                    yield {"contentBlockStop": {}}
                 if "text" in content:
                     yield {"contentBlockStart": {"start": {}}}
                     yield {"contentBlockDelta": {"delta": {"text": content["text"]}}}
