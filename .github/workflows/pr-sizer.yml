@@ -2,7 +2,7 @@ name: PR Size Labeler
 
 on:
   pull_request_target:
-    branches: integ-testing
+    branches: main
 
 jobs:
   authorization-check:
@@ -52,10 +52,8 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const { execSync } = require('child_process');
-            const additions = parseInt(execSync('git diff --numstat HEAD~1 | awk "{sum += $1} END {print sum}"').toString().trim()) || 0;
-            const deletions = parseInt(execSync('git diff --numstat HEAD~1 | awk "{sum += $2} END {print sum}"').toString().trim()) || 0;
-            const totalChanges = additions + deletions;
+            const pr = context.payload.pull_request;
+            const totalChanges = pr.additions + pr.deletions;
             
             let sizeLabel;
             if (totalChanges <= 20) sizeLabel = 'size/xs';
