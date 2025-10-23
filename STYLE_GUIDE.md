@@ -6,7 +6,6 @@ The Strands Agents style guide aims to establish consistent formatting, naming c
 
 Where possible, we will codify these style guidelines into our linting rules and pre-commit hooks to automate enforcement and reduce the manual review burden.
 
-
 ## Log Formatting
 
 The format for Strands Agents logs is as follows:
