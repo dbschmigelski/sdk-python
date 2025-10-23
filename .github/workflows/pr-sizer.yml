@@ -2,7 +2,7 @@ name: PR Size Labeler
 
 on:
   pull_request_target:
-    branches: main
+    branches: integ-testing
 
 jobs:
   authorization-check:
