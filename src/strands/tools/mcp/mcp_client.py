@@ -485,42 +485,6 @@ class MCPClient(ToolProvider):
 
         return read_resource_result
 
-    def subscribe_resource_sync(self, uri: AnyUrl | str) -> None:
-        """Synchronously subscribes to updates for a resource from the MCP server.
-
-        Args:
-            uri: The URI of the resource to subscribe to
-        """
-        self._log_debug_with_thread("subscribing to MCP resource: %s", uri)
-        if not self._is_session_active():
-            raise MCPClientInitializationError(CLIENT_SESSION_NOT_RUNNING_ERROR_MESSAGE)
-
-        async def _subscribe_resource_async() -> None:
-            # Convert string to AnyUrl if needed
-            resource_uri = AnyUrl(uri) if isinstance(uri, str) else uri
-            await cast(ClientSession, self._background_thread_session).subscribe_resource(resource_uri)
-
-        self._invoke_on_background_thread(_subscribe_resource_async()).result()
-        self._log_debug_with_thread("successfully subscribed to resource")
-
-    def unsubscribe_resource_sync(self, uri: AnyUrl | str) -> None:
-        """Synchronously unsubscribes from updates for a resource from the MCP server.
-
-        Args:
-            uri: The URI of the resource to unsubscribe from
-        """
-        self._log_debug_with_thread("unsubscribing from MCP resource: %s", uri)
-        if not self._is_session_active():
-            raise MCPClientInitializationError(CLIENT_SESSION_NOT_RUNNING_ERROR_MESSAGE)
-
-        async def _unsubscribe_resource_async() -> None:
-            # Convert string to AnyUrl if needed
-            resource_uri = AnyUrl(uri) if isinstance(uri, str) else uri
-            await cast(ClientSession, self._background_thread_session).unsubscribe_resource(resource_uri)
-
-        self._invoke_on_background_thread(_unsubscribe_resource_async()).result()
-        self._log_debug_with_thread("successfully unsubscribed from resource")
-
     def list_resource_templates_sync(self, pagination_token: Optional[str] = None) -> ListResourceTemplatesResult:
         """Synchronously retrieves the list of available resource templates from the MCP server.
 
