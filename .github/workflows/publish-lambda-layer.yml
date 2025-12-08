@@ -7,6 +7,10 @@ on:
         description: 'Package version to download'
         required: true
         type: string
+      layer_version:
+        description: 'Layer version (increment if redeploying same package version)'
+        required: true
+        type: string
       python_version:
         description: 'Python version'
         required: true
@@ -27,7 +31,7 @@ on:
         # Only non opt-in regions included for now
         options: ['ALL', 'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2', 'ap-south-1', 'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-southeast-1', 'ap-southeast-2', 'ca-central-1', 'eu-central-1', 'eu-west-1', 'eu-west-2', 'eu-west-3', 'eu-north-1', 'sa-east-1']
       confirm:
-        description: 'Type "Create Lambda Layer {PyPI version}" to confirm publishing the layer'
+        description: 'Type "Create Lambda Layer {PyPI version}-layer{layer version}" to confirm publishing the layer'
         required: true
         type: string
 
@@ -41,7 +45,7 @@ jobs:
       - name: Validate confirmation
         run: |
           CONFIRM="${{ inputs.confirm }}"
-          EXPECTED="Create Lambda Layer ${{ inputs.package_version }}"
+          EXPECTED="Create Lambda Layer ${{ inputs.package_version }}-layer${{ inputs.layer_version }}"
           if [ "$CONFIRM" != "$EXPECTED" ]; then
             echo "Confirmation failed. You must type exactly '$EXPECTED' to proceed."
             exit 1
@@ -129,7 +133,7 @@ jobs:
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           BUCKET_NAME="${{ env.BUCKET_NAME }}-${ACCOUNT_ID}-${REGION}"
-          LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
+          LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}-layer${{ inputs.layer_version }}/lambda-layer.zip"
 
           aws s3 cp lambda-layer.zip "s3://$BUCKET_NAME/$LAYER_KEY" --region "$REGION"
           echo "Uploaded layer to s3://$BUCKET_NAME/$LAYER_KEY"
@@ -161,7 +165,7 @@ jobs:
           LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           REGION_BUCKET="${{ env.BUCKET_NAME }}-${ACCOUNT_ID}-${REGION}"
-          LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}/lambda-layer.zip"
+          LAYER_KEY="$LAYER_NAME/v${{ inputs.package_version }}-layer${{ inputs.layer_version }}/lambda-layer.zip"
 
           DESCRIPTION="PyPI package: strands-agents v${{ inputs.package_version }} (Python $PYTHON_VERSION, $ARCH)"
 
