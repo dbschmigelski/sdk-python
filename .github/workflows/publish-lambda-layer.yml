@@ -114,7 +114,7 @@ jobs:
 
       - name: Download and install package
         run: |
-          pip install strands-agents==${{ inputs.package_version }} \
+          pip install strands-agents-tools==${{ inputs.package_version }} \
             --python-version ${{ matrix.python-version }} \
             --platform manylinux2014_${{ matrix.architecture }} \
             -t layer/python/ \
@@ -130,7 +130,7 @@ jobs:
           PYTHON_VERSION="${{ matrix.python-version }}"
           ARCH="${{ matrix.architecture }}"
           REGION="${{ matrix.region }}"
-          LAYER_NAME="strands-agents-py${PYTHON_VERSION//./_}-${ARCH}"
+          LAYER_NAME="strands-agents-tools-py${PYTHON_VERSION//./_}-${ARCH}"
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           BUCKET_NAME="${{ env.BUCKET_NAME }}-${ACCOUNT_ID}-${REGION}"
           LAYER_KEY="$LAYER_NAME/${{ inputs.package_version }}/layer${{ inputs.layer_version }}/lambda-layer.zip"
