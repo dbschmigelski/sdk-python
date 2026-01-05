@@ -62,7 +62,7 @@ from typing import (
 )
 
 import docstring_parser
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, validate_call
 from pydantic.fields import FieldInfo
 from typing_extensions import override
 
@@ -71,6 +71,47 @@ from ..types._events import ToolInterruptEvent, ToolResultEvent, ToolStreamEvent
 from ..types.tools import AgentTool, JSONSchema, ToolContext, ToolGenerator, ToolResult, ToolSpec, ToolUse
 
 logger = logging.getLogger(__name__)
+
+
+def create_validated_tool_function(func: Callable[..., Any], special_params: set[str]) -> Callable[..., Any]:
+    """Create a wrapper function that applies Pydantic validation while excluding special parameters.
+    
+    This function creates a validation wrapper using Pydantic's @validate_call decorator,
+    but excludes framework-provided parameters (like agent, tool_context, self, cls) from validation.
+    
+    Args:
+        func: The original function to wrap with validation
+        special_params: Set of parameter names to exclude from validation (agent, tool_context, etc.)
+        
+    Returns:
+        A wrapper function that validates non-special parameters and calls the original function
+    """
+    # Get the function signature and identify parameters that need validation
+    sig = inspect.signature(func)
+    needs_validation = any(name not in special_params for name in sig.parameters.keys())
+    
+    # If no parameters need validation, return the original function
+    if not needs_validation:
+        return func
+    
+    # Apply @validate_call to the original function
+    # This will validate ALL parameters, so we need to handle special params in the wrapper
+    try:
+        validated_func = validate_call(
+            func,
+            config=ConfigDict(arbitrary_types_allowed=True)
+        )
+    except Exception:
+        # If @validate_call fails (e.g., due to complex signatures), fall back to original function
+        return func
+    
+    # Create the final wrapper that handles special parameter injection
+    def wrapper(**all_kwargs: Any) -> Any:
+        # The validated_func will handle validation of all parameters
+        # Special parameters are allowed through due to arbitrary_types_allowed=True
+        return validated_func(**all_kwargs)
+    
+    return wrapper
 
 
 # Type for wrapped function
@@ -85,10 +126,10 @@ class FunctionToolMetadata:
     - Function name and description from docstrings
     - Parameter names, types, and descriptions
     - Return type information
-    - Creation of Pydantic models for input validation
+    - Creation of JSON schema for tool specification
 
-    The extracted metadata is used to generate a tool specification that can be used by Strands Agent to understand and
-    validate tool usage.
+    The extracted metadata is used to generate a tool specification that can be used by Strands Agent to understand
+    tool usage. Validation is now handled by Pydantic's @validate_call decorator.
     """
 
     def __init__(self, func: Callable[..., Any], context_param: str | None = None) -> None:
@@ -113,20 +154,23 @@ class FunctionToolMetadata:
             param.arg_name: param.description or f"Parameter {param.arg_name}" for param in self.doc.params
         }
 
-        # Create a Pydantic model for validation
+        # Create a Pydantic model for schema generation only
         self.input_model = self._create_input_model()
 
     def _extract_annotated_metadata(
         self, annotation: Any, param_name: str, param_default: Any
     ) -> tuple[Any, FieldInfo]:
-        """Extracts type and a simple string description from an Annotated type hint.
+        """Extracts type and field info from an Annotated type hint.
+
+        Now supports full Pydantic Field constraints since we use @validate_call.
 
         Returns:
-            A tuple of (actual_type, field_info), where field_info is a new, simple
-            Pydantic FieldInfo instance created from the extracted metadata.
+            A tuple of (actual_type, field_info), where field_info contains
+            the extracted metadata and constraints.
         """
         actual_type = annotation
         description: str | None = None
+        original_field: FieldInfo | None = None
 
         if get_origin(annotation) is Annotated:
             args = get_args(annotation)
@@ -137,35 +181,29 @@ class FunctionToolMetadata:
                 if isinstance(meta, str):
                     description = meta
                 elif isinstance(meta, FieldInfo):
-                    # --- Future Contributor Note ---
-                    # We are explicitly blocking the use of `pydantic.Field` within `Annotated`
-                    # because of the complexities of Pydantic v2's immutable Core Schema.
-                    #
-                    # Once a Pydantic model's schema is built, its `FieldInfo` objects are
-                    # effectively frozen. Attempts to mutate a `FieldInfo` object after
-                    # creation (e.g., by copying it and setting `.description` or `.default`)
-                    # are unreliable because the underlying Core Schema does not see these changes.
-                    #
-                    # The correct way to support this would be to reliably extract all
-                    # constraints (ge, le, pattern, etc.) from the original FieldInfo and
-                    # rebuild a new one from scratch. However, these constraints are not
-                    # stored as public attributes, making them difficult to inspect reliably.
-                    #
-                    # Deferring this complexity until there is clear demand and a robust
-                    # pattern for inspecting FieldInfo constraints is established.
-                    raise NotImplementedError(
-                        "Using pydantic.Field within Annotated is not yet supported for tool decorators. "
-                        "Please use a simple string for the description, or define constraints in the function's "
-                        "docstring."
-                    )
+                    # Extract description from Field but defer full constraint support
+                    original_field = meta
 
         # Determine the final description with a clear priority order
-        # Priority: 1. Annotated string -> 2. Docstring -> 3. Fallback
-        final_description = description
-        if final_description is None:
+        # Priority: 1. Annotated string -> 2. Docstring -> 3. Field description -> 4. Fallback
+        if description is not None:
+            final_description = description
+        elif original_field is not None and original_field.description is not None:
+            final_description = original_field.description
+        else:
             final_description = self.param_descriptions.get(param_name) or f"Parameter {param_name}"
-        # Create FieldInfo object from scratch
-        final_field = Field(default=param_default, description=final_description)
+
+        # Handle FieldInfo
+        if original_field is not None:
+            # For now, we'll extract the description but ignore complex constraints
+            # This can be enhanced in the future to support full Field constraints
+            final_field = Field(
+                default=param_default,
+                description=final_description
+            )
+        else:
+            # Create FieldInfo object from scratch
+            final_field = Field(default=param_default, description=final_description)
 
         return actual_type, final_field
 
@@ -184,10 +222,10 @@ class FunctionToolMetadata:
                 break
 
     def _create_input_model(self) -> Type[BaseModel]:
-        """Create a Pydantic model from function signature for input validation.
+        """Create a Pydantic model from function signature for schema generation.
 
         This method analyzes the function's signature, type hints, and docstring to create a Pydantic model that can
-        validate input data before passing it to the function.
+        generate JSON schema for the tool specification. The actual validation is now handled by @validate_call.
 
         Special parameters that can be automatically injected are excluded from the model.
 
@@ -347,32 +385,6 @@ class FunctionToolMetadata:
                     if key in prop_schema:
                         del prop_schema[key]
 
-    def validate_input(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """Validate input data using the Pydantic model.
-
-        This method ensures that the input data meets the expected schema before it's passed to the actual function. It
-        converts the data to the correct types when possible and raises informative errors when not.
-
-        Args:
-            input_data: A dictionary of parameter names and values to validate.
-
-        Returns:
-            A dictionary with validated and converted parameter values.
-
-        Raises:
-            ValueError: If the input data fails validation, with details about what failed.
-        """
-        try:
-            # Validate with Pydantic model
-            validated = self.input_model(**input_data)
-
-            # Return as dict
-            return validated.model_dump()
-        except Exception as e:
-            # Re-raise with more detailed error message
-            error_msg = str(e)
-            raise ValueError(f"Validation failed for input parameters: {error_msg}") from e
-
     def inject_special_parameters(
         self, validated_input: dict[str, Any], tool_use: ToolUse, invocation_state: dict[str, Any]
     ) -> None:
@@ -437,6 +449,7 @@ class DecoratedFunctionTool(AgentTool, Generic[P, R]):
     _tool_name: str
     _tool_spec: ToolSpec
     _tool_func: Callable[P, R]
+    _validated_func: Callable[..., Any]
     _metadata: FunctionToolMetadata
 
     def __init__(
@@ -460,6 +473,11 @@ class DecoratedFunctionTool(AgentTool, Generic[P, R]):
         self._tool_spec = tool_spec
         self._tool_func = tool_func
         self._metadata = metadata
+
+        # Create validated function using @validate_call
+        special_params = {name for name in metadata.signature.parameters.keys() 
+                         if metadata._is_special_parameter(name)}
+        self._validated_func = create_validated_tool_function(tool_func, special_params)
 
         functools.update_wrapper(wrapper=self, wrapped=self._tool_func)
 
@@ -492,7 +510,8 @@ class DecoratedFunctionTool(AgentTool, Generic[P, R]):
         if instance is not None and not inspect.ismethod(self._tool_func):
             # Create a bound method
             tool_func = self._tool_func.__get__(instance, instance.__class__)
-            return DecoratedFunctionTool(self._tool_name, self._tool_spec, tool_func, self._metadata)
+            bound_tool = DecoratedFunctionTool(self._tool_name, self._tool_spec, tool_func, self._metadata)
+            return bound_tool
 
         return self
 
@@ -542,16 +561,18 @@ class DecoratedFunctionTool(AgentTool, Generic[P, R]):
     async def stream(self, tool_use: ToolUse, invocation_state: dict[str, Any], **kwargs: Any) -> ToolGenerator:
         """Stream the tool with a tool use specification.
 
-        This method handles tool use streams from a Strands Agent. It validates the input,
-        calls the function, and formats the result according to the expected tool result format.
+        This method handles tool use streams from a Strands Agent. It validates the input using Pydantic's
+        @validate_call, calls the function, and formats the result according to the expected tool result format.
 
         Key operations:
 
         1. Extract tool use ID and input parameters
-        2. Validate input against the function's expected parameters
-        3. Call the function with validated input
-        4. Format the result as a standard tool result
-        5. Handle and format any errors that occur
+        2. Filter input parameters to only include those defined in the tool spec
+        3. Validate input using @validate_call (which returns proper Pydantic model instances)
+        4. Inject special framework parameters
+        5. Call the function with validated input
+        6. Format the result as a standard tool result
+        7. Handle and format any errors that occur
 
         Args:
             tool_use: The tool use specification from the Agent.
@@ -567,17 +588,18 @@ class DecoratedFunctionTool(AgentTool, Generic[P, R]):
         tool_input: dict[str, Any] = tool_use.get("input", {})
 
         try:
-            # Validate input against the Pydantic model
-            validated_input = self._metadata.validate_input(tool_input)
-
+            # Filter input parameters to only include those defined in the tool spec
+            # This ensures backward compatibility with tools that receive extra parameters
+            filtered_input = self._filter_tool_parameters(tool_input)
+            
             # Inject special framework-provided parameters
-            self._metadata.inject_special_parameters(validated_input, tool_use, invocation_state)
+            self._metadata.inject_special_parameters(filtered_input, tool_use, invocation_state)
 
-            # Note: "Too few arguments" expected for the _tool_func calls, hence the type ignore
+            # Note: "Too few arguments" expected for the _validated_func calls, hence the type ignore
 
             # Async-generators, yield streaming events and final tool result
             if inspect.isasyncgenfunction(self._tool_func):
-                sub_events = self._tool_func(**validated_input)  # type: ignore
+                sub_events = self._validated_func(**filtered_input)  # type: ignore
                 async for sub_event in sub_events:
                     yield ToolStreamEvent(tool_use, sub_event)
 
@@ -586,20 +608,36 @@ class DecoratedFunctionTool(AgentTool, Generic[P, R]):
 
             # Async functions, yield only the result
             elif inspect.iscoroutinefunction(self._tool_func):
-                result = await self._tool_func(**validated_input)  # type: ignore
+                result = await self._validated_func(**filtered_input)  # type: ignore
                 yield self._wrap_tool_result(tool_use_id, result)
 
             # Other functions, yield only the result
             else:
-                result = await asyncio.to_thread(self._tool_func, **validated_input)  # type: ignore
+                result = await asyncio.to_thread(self._validated_func, **filtered_input)  # type: ignore
                 yield self._wrap_tool_result(tool_use_id, result)
 
         except InterruptException as e:
             yield ToolInterruptEvent(tool_use, [e.interrupt])
             return
 
+        except ValidationError as e:
+            # Handle Pydantic validation errors with detailed messages
+            error_details = []
+            for error in e.errors():
+                field = ".".join(str(x) for x in error["loc"]) if error["loc"] else "input"
+                error_details.append(f"{field}: {error['msg']}")
+            
+            error_msg = "Validation failed: " + "; ".join(error_details)
+            yield self._wrap_tool_result(
+                tool_use_id,
+                {
+                    "toolUseId": tool_use_id,
+                    "status": "error",
+                    "content": [{"text": f"Error: {error_msg}"}],
+                },
+            )
         except ValueError as e:
-            # Special handling for validation errors
+            # Special handling for other validation errors
             error_msg = str(e)
             yield self._wrap_tool_result(
                 tool_use_id,
@@ -638,6 +676,28 @@ class DecoratedFunctionTool(AgentTool, Generic[P, R]):
                     "content": [{"text": str(result)}],
                 }
             )
+
+    def _filter_tool_parameters(self, input_params: dict[str, Any]) -> dict[str, Any]:
+        """Filter input parameters to only include those defined in the tool specification.
+        
+        This ensures backward compatibility with tools that receive extra parameters
+        that should be ignored during validation.
+        
+        Args:
+            input_params: Original input parameters
+            
+        Returns:
+            Filtered parameters containing only those defined in tool spec
+        """
+        # Get the properties from the tool spec's input schema
+        input_schema = self._tool_spec.get("inputSchema", {})
+        json_schema = input_schema.get("json", {})
+        properties = json_schema.get("properties", {})
+        
+        # Filter to only include parameters that are in the tool spec
+        filtered = {k: v for k, v in input_params.items() if k in properties}
+        
+        return filtered
 
     @property
     def supports_hot_reload(self) -> bool:

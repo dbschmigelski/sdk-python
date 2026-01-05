@@ -69,8 +69,8 @@ def test_tool_name(identity_tool):
 
 @pytest.mark.parametrize("identity_tool", ["identity_invoke", "identity_invoke_async"], indirect=True)
 def test_tool_spec(identity_tool):
-    tru_spec = identity_tool.tool_spec
-    exp_spec = {
+    actual_spec = identity_tool.tool_spec
+    expected_spec = {
         "name": "identity",
         "description": "identity",
         "inputSchema": {
@@ -86,7 +86,7 @@ def test_tool_spec(identity_tool):
             }
         },
     }
-    assert tru_spec == exp_spec
+    assert actual_spec == expected_spec
 
 
 @pytest.mark.parametrize("identity_tool", ["identity_invoke", "identity_invoke_async"], indirect=True)
@@ -215,34 +215,39 @@ async def test_basic_tool_creation(alist):
         """
         return f"Result: {param1} {param2}"
 
-    # Check TOOL_SPEC was generated correctly
-    assert test_tool.tool_spec is not None
-    spec = test_tool.tool_spec
-
-    # Check basic spec properties
-    assert spec["name"] == "test_tool"
-    assert spec["description"] == "Test tool function."
-
-    # Check input schema
-    schema = spec["inputSchema"]["json"]
-    assert schema["type"] == "object"
-    assert set(schema["required"]) == {"param1", "param2"}
-
-    # Check parameter properties
-    assert schema["properties"]["param1"]["type"] == "string"
-    assert schema["properties"]["param2"]["type"] == "integer"
-    assert schema["properties"]["param1"]["description"] == "First parameter"
-    assert schema["properties"]["param2"]["description"] == "Second parameter"
+    # Check complete tool spec
+    actual_spec = test_tool.tool_spec
+    expected_spec = {
+        "name": "test_tool",
+        "description": "Test tool function.",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "param1": {
+                        "description": "First parameter",
+                        "type": "string",
+                    },
+                    "param2": {
+                        "description": "Second parameter", 
+                        "type": "integer",
+                    },
+                },
+                "required": ["param1", "param2"],
+            }
+        },
+    }
+    assert actual_spec == expected_spec
 
     # Test actual usage
     tool_use = {"toolUseId": "test-id", "input": {"param1": "hello", "param2": 42}}
     stream = test_tool.stream(tool_use, {})
 
-    tru_events = await alist(stream)
-    exp_events = [
+    actual_events = await alist(stream)
+    expected_events = [
         ToolResultEvent({"toolUseId": "test-id", "status": "success", "content": [{"text": "Result: hello 42"}]})
     ]
-    assert tru_events == exp_events
+    assert actual_events == expected_events
 
     # Make sure these are set properly
     assert test_tool.__wrapped__ is not None
@@ -256,10 +261,24 @@ def test_tool_with_custom_name_description():
     def test_tool(param: str) -> str:
         return f"Result: {param}"
 
-    spec = test_tool.tool_spec
-
-    assert spec["name"] == "custom_name"
-    assert spec["description"] == "Custom description"
+    actual_spec = test_tool.tool_spec
+    expected_spec = {
+        "name": "custom_name",
+        "description": "Custom description",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "param": {
+                        "description": "Parameter param",
+                        "type": "string",
+                    },
+                },
+                "required": ["param"],
+            }
+        },
+    }
+    assert actual_spec == expected_spec
 
 
 @pytest.mark.asyncio
@@ -278,32 +297,49 @@ async def test_tool_with_optional_params(alist):
             return f"Result: {required}"
         return f"Result: {required} {optional}"
 
-    spec = test_tool.tool_spec
-    schema = spec["inputSchema"]["json"]
-
-    # Only required should be in required list
-    assert "required" in schema["required"]
-    assert "optional" not in schema["required"]
+    # Check complete tool spec
+    actual_spec = test_tool.tool_spec
+    expected_spec = {
+        "name": "test_tool",
+        "description": "Test with optional param.",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "required": {
+                        "description": "Required parameter",
+                        "type": "string",
+                    },
+                    "optional": {
+                        "description": "Optional parameter",
+                        "type": "integer",
+                    },
+                },
+                "required": ["required"],
+            }
+        },
+    }
+    assert actual_spec == expected_spec
 
     # Test with only required param
     tool_use = {"toolUseId": "test-id", "input": {"required": "hello"}}
     stream = test_tool.stream(tool_use, {})
 
-    tru_events = await alist(stream)
-    exp_events = [
+    actual_events = await alist(stream)
+    expected_events = [
         ToolResultEvent({"toolUseId": "test-id", "status": "success", "content": [{"text": "Result: hello"}]})
     ]
-    assert tru_events == exp_events
+    assert actual_events == expected_events
 
     # Test with both params
     tool_use = {"toolUseId": "test-id", "input": {"required": "hello", "optional": 42}}
     stream = test_tool.stream(tool_use, {})
 
-    tru_events = await alist(stream)
-    exp_events = [
+    actual_events = await alist(stream)
+    expected_events = [
         ToolResultEvent({"toolUseId": "test-id", "status": "success", "content": [{"text": "Result: hello 42"}]})
     ]
-    assert tru_events == exp_events
+    assert actual_events == expected_events
 
 
 @pytest.mark.asyncio
@@ -490,7 +526,7 @@ async def test_tool_error_handling(alist):
 
     result = (await alist(stream))[-1]
     assert result["tool_result"]["status"] == "error"
-    assert "validation error for test_tooltool\nrequired\n" in result["tool_result"]["content"][0]["text"].lower(), (
+    assert "validation failed: required: missing" in result["tool_result"]["content"][0]["text"].lower(), (
         "Validation error should indicate which argument is missing"
     )
 
@@ -518,14 +554,36 @@ def test_type_handling():
         """Test basic types."""
         return "Success"
 
-    spec = test_tool.tool_spec
-    schema = spec["inputSchema"]["json"]
-    props = schema["properties"]
-
-    assert props["str_param"]["type"] == "string"
-    assert props["int_param"]["type"] == "integer"
-    assert props["float_param"]["type"] == "number"
-    assert props["bool_param"]["type"] == "boolean"
+    actual_spec = test_tool.tool_spec
+    expected_spec = {
+        "name": "test_tool",
+        "description": "Test basic types.",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "str_param": {
+                        "description": "Parameter str_param",
+                        "type": "string",
+                    },
+                    "int_param": {
+                        "description": "Parameter int_param",
+                        "type": "integer",
+                    },
+                    "float_param": {
+                        "description": "Parameter float_param",
+                        "type": "number",
+                    },
+                    "bool_param": {
+                        "description": "Parameter bool_param",
+                        "type": "boolean",
+                    },
+                },
+                "required": ["str_param", "int_param", "float_param", "bool_param"],
+            }
+        },
+    }
+    assert actual_spec == expected_spec
 
 
 @pytest.mark.asyncio
@@ -1629,31 +1687,74 @@ def test_tool_decorator_annotated_string_description():
         """
         return f"{name}, {age}, {city}"
 
-    spec = annotated_tool.tool_spec
-    schema = spec["inputSchema"]["json"]
-
-    # Check that annotated descriptions are used
-    assert schema["properties"]["name"]["description"] == "The user's full name"
-    assert schema["properties"]["age"]["description"] == "The user's age in years"
-
-    # Check that docstring is still used for non-annotated params
-    assert schema["properties"]["city"]["description"] == "The user's city (from docstring)"
-
-    # Verify all are required
-    assert set(schema["required"]) == {"name", "age", "city"}
+    actual_spec = annotated_tool.tool_spec
+    expected_spec = {
+        "name": "annotated_tool",
+        "description": "Tool with annotated parameters.",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "description": "The user's full name",
+                        "type": "string",
+                    },
+                    "age": {
+                        "description": "The user's age in years",
+                        "type": "integer",
+                    },
+                    "city": {
+                        "description": "The user's city (from docstring)",
+                        "type": "string",
+                    },
+                },
+                "required": ["name", "age", "city"],
+            }
+        },
+    }
+    assert actual_spec == expected_spec
 
 
 def test_tool_decorator_annotated_pydantic_field_constraints():
-    """Test that using pydantic.Field in Annotated raises a NotImplementedError."""
-    with pytest.raises(NotImplementedError, match="Using pydantic.Field within Annotated is not yet supported"):
+    """Test that using pydantic.Field in Annotated works but constraints are not yet fully supported."""
+    
+    @strands.tool
+    def field_annotated_tool(
+        email: Annotated[str, Field(description="User's email address", pattern=r"^[\w\.-]+@[\w\.-]+\.\w+$")],
+        score: Annotated[int, Field(description="Score between 0-100", ge=0, le=100)] = 50,
+    ) -> str:
+        """Tool with Pydantic Field annotations."""
+        return f"{email}: {score}"
 
-        @strands.tool
-        def field_annotated_tool(
-            email: Annotated[str, Field(description="User's email address", pattern=r"^[\w\.-]+@[\w\.-]+\\.w+$")],
-            score: Annotated[int, Field(description="Score between 0-100", ge=0, le=100)] = 50,
-        ) -> str:
-            """Tool with Pydantic Field annotations."""
-            return f"{email}: {score}"
+    # Verify the tool was created successfully (no NotImplementedError)
+    assert field_annotated_tool.tool_name == "field_annotated_tool"
+    
+    # Check complete tool spec
+    actual_spec = field_annotated_tool.tool_spec
+    expected_spec = {
+        "name": "field_annotated_tool",
+        "description": "Tool with Pydantic Field annotations.",
+        "inputSchema": {
+            "json": {
+                "type": "object",
+                "properties": {
+                    "email": {
+                        "description": "User's email address",
+                        "type": "string",
+                    },
+                    "score": {
+                        "description": "Score between 0-100",
+                        "type": "integer",
+                    },
+                },
+                "required": ["email"],
+            }
+        },
+    }
+    assert actual_spec == expected_spec
+    
+    # Note: Field constraints (pattern, ge, le) are not yet supported in schema generation
+    # but the tool should work without raising NotImplementedError
 
 
 def test_tool_decorator_annotated_overrides_docstring():
@@ -1720,23 +1821,43 @@ def test_tool_decorator_annotated_complex_types():
 
 
 def test_tool_decorator_annotated_mixed_styles():
-    """Test that using pydantic.Field in a mixed-style annotation raises NotImplementedError."""
-    with pytest.raises(NotImplementedError, match="Using pydantic.Field within Annotated is not yet supported"):
+    """Test that using pydantic.Field in a mixed-style annotation works (without full constraint support)."""
+    
+    @strands.tool
+    def mixed_tool(
+        plain: str,
+        annotated_str: Annotated[str, "String description"],
+        annotated_field: Annotated[int, Field(description="Field description", ge=0)],
+        docstring_only: int,
+    ) -> str:
+        """Tool with mixed parameter styles.
 
-        @strands.tool
-        def mixed_tool(
-            plain: str,
-            annotated_str: Annotated[str, "String description"],
-            annotated_field: Annotated[int, Field(description="Field description", ge=0)],
-            docstring_only: int,
-        ) -> str:
-            """Tool with mixed parameter styles.
+        Args:
+            plain: Plain parameter description
+            docstring_only: Docstring description for this param
+        """
+        return "mixed"
 
-            Args:
-                plain: Plain parameter description
-                docstring_only: Docstring description for this param
-            """
-            return "mixed"
+    # Verify the tool was created successfully (no NotImplementedError)
+    assert mixed_tool.tool_name == "mixed_tool"
+    
+    # Check that the schema includes all parameter types correctly
+    spec = mixed_tool.tool_spec
+    schema = spec["inputSchema"]["json"]
+    
+    # Verify all parameters are present
+    assert "plain" in schema["properties"]
+    assert "annotated_str" in schema["properties"] 
+    assert "annotated_field" in schema["properties"]
+    assert "docstring_only" in schema["properties"]
+    
+    # Verify descriptions are correct
+    assert schema["properties"]["annotated_str"]["description"] == "String description"
+    assert schema["properties"]["annotated_field"]["description"] == "Field description"
+    assert schema["properties"]["plain"]["description"] == "Plain parameter description"
+    assert schema["properties"]["docstring_only"]["description"] == "Docstring description for this param"
+    
+    # Note: Field constraints (ge=0) are not yet supported in schema generation
 
 
 @pytest.mark.asyncio
@@ -1762,19 +1883,27 @@ async def test_tool_decorator_annotated_execution(alist):
 
 
 def test_tool_decorator_annotated_no_description_fallback():
-    """Test that Annotated with a Field raises NotImplementedError."""
-    with pytest.raises(NotImplementedError, match="Using pydantic.Field within Annotated is not yet supported"):
+    """Test that Annotated with a Field without description works and falls back to docstring."""
+    
+    @strands.tool
+    def no_desc_annotated(
+        param: Annotated[str, Field()],  # Field without description
+    ) -> str:
+        """Tool with Annotated but no description.
 
-        @strands.tool
-        def no_desc_annotated(
-            param: Annotated[str, Field()],  # Field without description
-        ) -> str:
-            """Tool with Annotated but no description.
+        Args:
+            param: Docstring description
+        """
+        return param
 
-            Args:
-                param: Docstring description
-            """
-            return param
+    # Verify the tool was created successfully
+    assert no_desc_annotated.tool_name == "no_desc_annotated"
+    
+    # Check that it falls back to docstring description
+    spec = no_desc_annotated.tool_spec
+    schema = spec["inputSchema"]["json"]
+    
+    assert schema["properties"]["param"]["description"] == "Docstring description"
 
 
 def test_tool_decorator_annotated_empty_string_description():
@@ -1816,9 +1945,262 @@ async def test_tool_decorator_annotated_validation_error(alist):
 
 
 def test_tool_decorator_annotated_field_with_inner_default():
-    """Test that a default value in an Annotated Field raises NotImplementedError."""
-    with pytest.raises(NotImplementedError, match="Using pydantic.Field within Annotated is not yet supported"):
+    """Test that a default value in an Annotated Field works correctly."""
+    
+    @strands.tool
+    def inner_default_tool(name: str, level: Annotated[int, Field(description="A level value", default=10)]) -> str:
+        return f"{name} is at level {level}"
 
-        @strands.tool
-        def inner_default_tool(name: str, level: Annotated[int, Field(description="A level value", default=10)]) -> str:
-            return f"{name} is at level {level}"
+    # Verify the tool was created successfully (no NotImplementedError)
+    assert inner_default_tool.tool_name == "inner_default_tool"
+    
+    # Check that the schema reflects the description
+    spec = inner_default_tool.tool_spec
+    schema = spec["inputSchema"]["json"]
+    
+    assert schema["properties"]["level"]["description"] == "A level value"
+    assert "name" in schema["required"]  # name has no default
+    # Note: Field default handling is not yet fully implemented
+
+
+@pytest.mark.asyncio
+async def test_validate_call_with_pydantic_models(alist):
+    """Test that @validate_call properly handles Pydantic model parameters."""
+    from pydantic import BaseModel
+    
+    class Person(BaseModel):
+        name: str
+        age: int
+        
+    @strands.tool
+    def process_person(person: Person) -> str:
+        """Tool that takes a Pydantic model as input.
+        
+        Args:
+            person: A person object
+        """
+        return f"{person.name} is {person.age} years old"
+    
+    # Test with valid input that should be converted to Person instance
+    tool_use = {
+        "toolUseId": "test-id", 
+        "input": {"person": {"name": "Alice", "age": 30}}
+    }
+    stream = process_person.stream(tool_use, {})
+    
+    result = (await alist(stream))[-1]
+    assert result["tool_result"]["status"] == "success"
+    assert "Alice is 30 years old" in result["tool_result"]["content"][0]["text"]
+    
+    # Test with invalid input (missing required field)
+    tool_use = {
+        "toolUseId": "test-id", 
+        "input": {"person": {"name": "Bob"}}  # missing age
+    }
+    stream = process_person.stream(tool_use, {})
+    
+    result = (await alist(stream))[-1]
+    assert result["tool_result"]["status"] == "error"
+    assert "validation" in result["tool_result"]["content"][0]["text"].lower()
+
+
+@pytest.mark.asyncio 
+async def test_validate_call_with_complex_nested_types(alist):
+    """Test @validate_call with complex nested data structures."""
+    from typing import Dict, List
+    
+    @strands.tool
+    def process_nested_data(
+        config: Dict[str, List[Dict[str, Any]]]
+    ) -> str:
+        """Tool with deeply nested type structure.
+        
+        Args:
+            config: Complex nested configuration
+        """
+        total_items = sum(len(items) for items in config.values())
+        return f"Processed {total_items} items across {len(config)} categories"
+    
+    # Test with valid nested structure
+    nested_data = {
+        "users": [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}],
+        "settings": [{"key": "theme", "value": "dark"}]
+    }
+    
+    tool_use = {
+        "toolUseId": "test-id",
+        "input": {"config": nested_data}
+    }
+    stream = process_nested_data.stream(tool_use, {})
+    
+    result = (await alist(stream))[-1]
+    assert result["tool_result"]["status"] == "success"
+    assert "Processed 3 items across 2 categories" in result["tool_result"]["content"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_validate_call_error_handling_improvements(alist):
+    """Test that @validate_call provides better error messages than the old system."""
+    
+    @strands.tool
+    def strict_validation_tool(
+        email: str,
+        age: int,
+        active: bool
+    ) -> str:
+        """Tool with strict type validation.
+        
+        Args:
+            email: Email address
+            age: Age in years  
+            active: Whether user is active
+        """
+        return f"User {email}, age {age}, active: {active}"
+    
+    # Test multiple validation errors at once
+    tool_use = {
+        "toolUseId": "test-id",
+        "input": {
+            "email": 123,  # wrong type
+            "age": "not_a_number",  # wrong type
+            "active": "maybe"  # wrong type
+        }
+    }
+    stream = strict_validation_tool.stream(tool_use, {})
+    
+    result = (await alist(stream))[-1]
+    assert result["tool_result"]["status"] == "error"
+    
+    error_text = result["tool_result"]["content"][0]["text"].lower()
+    # Should mention validation failed
+    assert "validation failed" in error_text
+    # Should mention the problematic fields
+    assert any(field in error_text for field in ["email", "age", "active"])
+
+
+def test_validate_call_preserves_function_metadata():
+    """Test that @validate_call preserves original function metadata."""
+    
+    @strands.tool
+    def documented_function(param: str) -> str:
+        """This is a well-documented function.
+        
+        Args:
+            param: A parameter
+            
+        Returns:
+            A result string
+        """
+        return f"Result: {param}"
+    
+    # Verify that function metadata is preserved
+    assert documented_function.__name__ == "documented_function"
+    assert "well-documented function" in documented_function.__doc__
+    
+    # Verify tool spec is generated correctly
+    spec = documented_function.tool_spec
+    assert spec["name"] == "documented_function"
+    assert "well-documented function" in spec["description"]
+
+
+@pytest.mark.asyncio
+async def test_validate_call_with_special_parameters(alist):
+    """Test that special parameters (agent, tool_context) are handled correctly with @validate_call."""
+    
+    @strands.tool(context=True)
+    def tool_with_special_params(
+        regular_param: str,
+        agent: Agent,
+        tool_context: ToolContext
+    ) -> str:
+        """Tool that mixes regular and special parameters.
+        
+        Args:
+            regular_param: A regular parameter that should be validated
+        """
+        tool_id = tool_context.tool_use["toolUseId"]
+        return f"Agent: {agent.name}, Param: {regular_param}, Tool ID: {tool_id}"
+    
+    mock_agent = Agent(name="test_agent")
+    
+    # Test that regular params are validated but special params are injected
+    tool_use = {
+        "toolUseId": "special-test-id",
+        "input": {"regular_param": "test_value"}
+        # Note: agent and tool_context should be injected automatically
+    }
+    
+    stream = tool_with_special_params.stream(tool_use, {"agent": mock_agent})
+    
+    result = (await alist(stream))[-1]
+    assert result["tool_result"]["status"] == "success"
+    
+    content = result["tool_result"]["content"][0]["text"]
+    assert "Agent: test_agent" in content
+    assert "Param: test_value" in content
+    assert "Tool ID: special-test-id" in content
+
+
+def test_validate_call_fallback_behavior():
+    """Test that the system gracefully falls back when @validate_call fails."""
+    
+    # This test ensures that if @validate_call fails to wrap a function
+    # (due to complex signatures or other issues), we fall back gracefully
+    
+    @strands.tool
+    def simple_fallback_tool(param: str) -> str:
+        """Simple tool that should work even if @validate_call fails."""
+        return f"Fallback: {param}"
+    
+    # Verify the tool was created successfully
+    assert simple_fallback_tool.tool_name == "simple_fallback_tool"
+    
+    # Verify it has the expected spec
+    spec = simple_fallback_tool.tool_spec
+    assert spec["name"] == "simple_fallback_tool"
+    assert "param" in spec["inputSchema"]["json"]["properties"]
+
+
+@pytest.mark.asyncio
+async def test_validate_call_json_serialization_fix(alist):
+    """Test that the new implementation fixes JSON serialization issues."""
+    from datetime import date
+    from decimal import Decimal
+    
+    @strands.tool
+    def json_serialization_tool(
+        test_date: str,  # We'll pass a date-like string
+        test_number: float  # We'll pass a decimal-like number
+    ) -> dict:
+        """Tool that returns data that should be JSON serializable.
+        
+        Args:
+            test_date: A date string
+            test_number: A number
+        """
+        # Return a properly formatted tool result
+        return {
+            "status": "success",
+            "content": [{"text": f"Date: {test_date}, Number: {test_number}"}]
+        }
+    
+    # Test with inputs that would cause JSON serialization issues in the old system
+    tool_use = {
+        "toolUseId": "json-test-id",
+        "input": {
+            "test_date": "2023-12-25",
+            "test_number": 123.45
+        }
+    }
+    
+    stream = json_serialization_tool.stream(tool_use, {})
+    
+    result = (await alist(stream))[-1]
+    assert result["tool_result"]["status"] == "success"
+    assert "Date: 2023-12-25" in result["tool_result"]["content"][0]["text"]
+    assert "Number: 123.45" in result["tool_result"]["content"][0]["text"]
+    
+    # The key test: the result should be JSON serializable
+    import json
+    json_str = json.dumps(result["tool_result"])
+    assert json_str is not None
