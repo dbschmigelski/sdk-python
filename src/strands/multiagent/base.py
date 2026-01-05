@@ -3,39 +3,44 @@
 Provides minimal foundation for multi-agent patterns (Swarm, Graph).
 """
 
-import asyncio
 import logging
 import warnings
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Union
+from typing import Any, AsyncIterator, Mapping, Union
 
+from .._async import run_async
 from ..agent import AgentResult
-from ..types.content import ContentBlock
+from ..interrupt import Interrupt
 from ..types.event_loop import Metrics, Usage
+from ..types.multiagent import MultiAgentInput
+from ..types.traces import AttributeValue
 
 logger = logging.getLogger(__name__)
 
 
 class Status(Enum):
-    """Execution status for both graphs and nodes."""
+    """Execution status for both graphs and nodes.
+
+    Attributes:
+        PENDING: Task has not started execution yet.
+        EXECUTING: Task is currently running.
+        COMPLETED: Task finished successfully.
+        FAILED: Task encountered an error and could not complete.
+        INTERRUPTED: Task was interrupted by user.
+    """
 
     PENDING = "pending"
     EXECUTING = "executing"
     COMPLETED = "completed"
     FAILED = "failed"
+    INTERRUPTED = "interrupted"
 
 
 @dataclass
 class NodeResult:
-    """Unified result from node execution - handles both Agent and nested MultiAgentBase results.
-
-    The status field represents the semantic outcome of the node's work:
-    - COMPLETED: The node's task was successfully accomplished
-    - FAILED: The node's task failed or produced an error
-    """
+    """Unified result from node execution - handles both Agent and nested MultiAgentBase results."""
 
     # Core result data - single AgentResult, nested MultiAgentResult, or Exception
     result: Union[AgentResult, "MultiAgentResult", Exception]
@@ -48,6 +53,7 @@ class NodeResult:
     accumulated_usage: Usage = field(default_factory=lambda: Usage(inputTokens=0, outputTokens=0, totalTokens=0))
     accumulated_metrics: Metrics = field(default_factory=lambda: Metrics(latencyMs=0))
     execution_count: int = 0
+    interrupts: list[Interrupt] = field(default_factory=list)
 
     def get_agent_results(self) -> list[AgentResult]:
         """Get all AgentResult objects from this node, flattened if nested."""
@@ -79,6 +85,7 @@ class NodeResult:
             "accumulated_usage": self.accumulated_usage,
             "accumulated_metrics": self.accumulated_metrics,
             "execution_count": self.execution_count,
+            "interrupts": [interrupt.to_dict() for interrupt in self.interrupts],
         }
 
     @classmethod
@@ -101,6 +108,10 @@ class NodeResult:
         usage = _parse_usage(data.get("accumulated_usage", {}))
         metrics = _parse_metrics(data.get("accumulated_metrics", {}))
 
+        interrupts = []
+        for interrupt_data in data.get("interrupts", []):
+            interrupts.append(Interrupt(**interrupt_data))
+
         return cls(
             result=result,
             execution_time=int(data.get("execution_time", 0)),
@@ -108,17 +119,13 @@ class NodeResult:
             accumulated_usage=usage,
             accumulated_metrics=metrics,
             execution_count=int(data.get("execution_count", 0)),
+            interrupts=interrupts,
         )
 
 
 @dataclass
 class MultiAgentResult:
-    """Result from multi-agent execution with accumulated metrics.
-
-    The status field represents the outcome of the MultiAgentBase execution:
-    - COMPLETED: The execution was successfully accomplished
-    - FAILED: The execution failed or produced an error
-    """
+    """Result from multi-agent execution with accumulated metrics."""
 
     status: Status = Status.PENDING
     results: dict[str, NodeResult] = field(default_factory=lambda: {})
@@ -126,6 +133,7 @@ class MultiAgentResult:
     accumulated_metrics: Metrics = field(default_factory=lambda: Metrics(latencyMs=0))
     execution_count: int = 0
     execution_time: int = 0
+    interrupts: list[Interrupt] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "MultiAgentResult":
@@ -137,13 +145,18 @@ class MultiAgentResult:
         usage = _parse_usage(data.get("accumulated_usage", {}))
         metrics = _parse_metrics(data.get("accumulated_metrics", {}))
 
+        interrupts = []
+        for interrupt_data in data.get("interrupts", []):
+            interrupts.append(Interrupt(**interrupt_data))
+
         multiagent_result = cls(
-            status=Status(data.get("status", Status.PENDING.value)),
+            status=Status(data["status"]),
             results=results,
             accumulated_usage=usage,
             accumulated_metrics=metrics,
             execution_count=int(data.get("execution_count", 0)),
             execution_time=int(data.get("execution_time", 0)),
+            interrupts=interrupts,
         )
         return multiagent_result
 
@@ -157,6 +170,7 @@ class MultiAgentResult:
             "accumulated_metrics": self.accumulated_metrics,
             "execution_count": self.execution_count,
             "execution_time": self.execution_time,
+            "interrupts": [interrupt.to_dict() for interrupt in self.interrupts],
         }
 
 
@@ -165,11 +179,16 @@ class MultiAgentBase(ABC):
 
     This class integrates with existing Strands Agent instances and provides
     multi-agent orchestration capabilities.
+
+    Attributes:
+        id: Unique MultiAgent id for session management,etc.
     """
+
+    id: str
 
     @abstractmethod
     async def invoke_async(
-        self, task: str | list[ContentBlock], invocation_state: dict[str, Any] | None = None, **kwargs: Any
+        self, task: MultiAgentInput, invocation_state: dict[str, Any] | None = None, **kwargs: Any
     ) -> MultiAgentResult:
         """Invoke asynchronously.
 
@@ -181,8 +200,33 @@ class MultiAgentBase(ABC):
         """
         raise NotImplementedError("invoke_async not implemented")
 
+    async def stream_async(
+        self, task: MultiAgentInput, invocation_state: dict[str, Any] | None = None, **kwargs: Any
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Stream events during multi-agent execution.
+
+        Default implementation executes invoke_async and yields the result as a single event.
+        Subclasses can override this method to provide true streaming capabilities.
+
+        Args:
+            task: The task to execute
+            invocation_state: Additional state/context passed to underlying agents.
+                Defaults to None to avoid mutable default argument issues.
+            **kwargs: Additional keyword arguments passed to underlying agents.
+
+        Yields:
+            Dictionary events containing multi-agent execution information including:
+            - Multi-agent coordination events (node start/complete, handoffs)
+            - Forwarded single-agent events with node context
+            - Final result event
+        """
+        # Default implementation for backward compatibility
+        # Execute invoke_async and yield the result as a single event
+        result = await self.invoke_async(task, invocation_state, **kwargs)
+        yield {"result": result}
+
     def __call__(
-        self, task: str | list[ContentBlock], invocation_state: dict[str, Any] | None = None, **kwargs: Any
+        self, task: MultiAgentInput, invocation_state: dict[str, Any] | None = None, **kwargs: Any
     ) -> MultiAgentResult:
         """Invoke synchronously.
 
@@ -199,12 +243,7 @@ class MultiAgentBase(ABC):
             invocation_state.update(kwargs)
             warnings.warn("`**kwargs` parameter is deprecating, use `invocation_state` instead.", stacklevel=2)
 
-        def execute() -> MultiAgentResult:
-            return asyncio.run(self.invoke_async(task, invocation_state))
-
-        with ThreadPoolExecutor() as executor:
-            future = executor.submit(execute)
-            return future.result()
+        return run_async(lambda: self.invoke_async(task, invocation_state))
 
     def serialize_state(self) -> dict[str, Any]:
         """Return a JSON-serializable snapshot of the orchestrator state."""
@@ -213,6 +252,18 @@ class MultiAgentBase(ABC):
     def deserialize_state(self, payload: dict[str, Any]) -> None:
         """Restore orchestrator state from a session dict."""
         raise NotImplementedError
+
+    def _parse_trace_attributes(
+        self, attributes: Mapping[str, AttributeValue] | None = None
+    ) -> dict[str, AttributeValue]:
+        trace_attributes: dict[str, AttributeValue] = {}
+        if attributes:
+            for k, v in attributes.items():
+                if isinstance(v, (str, int, float, bool)) or (
+                    isinstance(v, list) and all(isinstance(x, (str, int, float, bool)) for x in v)
+                ):
+                    trace_attributes[k] = v
+        return trace_attributes
 
 
 # Private helper function to avoid duplicate code

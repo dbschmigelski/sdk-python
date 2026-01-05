@@ -1,60 +1,22 @@
 """Interrupt related type definitions for human-in-the-loop workflows.
 
 Interrupt Flow:
-    ┌─────────────────┐
-    │ Agent Invoke    │
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐
-    │ Hook Calls      │
-    | on Event        |
-    └────────┬────────┘
-             │
-             ▼
-    ┌─────────────────┐    No     ┌─────────────────┐
-    │ Interrupts      │ ────────► │ Continue        │
-    │ Raised?         │           │ Execution       │
-    └────────┬────────┘           └─────────────────┘
-             │ Yes
-             ▼
-    ┌─────────────────┐
-    │ Stop Event Loop │◄───────────────────┐
-    └────────┬────────┘                    |
-             │                             |
-             ▼                             |
-    ┌─────────────────┐                    |
-    │ Return          |                    |
-    | Interrupts      │                    |
-    └────────┬────────┘                    |
-             │                             |
-             ▼                             |
-    ┌─────────────────┐                    |
-    │ Agent Invoke    │                    |
-    │ with Responses  │                    |
-    └────────┬────────┘                    |
-             │                             |
-             ▼                             |
-    ┌─────────────────┐                    |
-    │ Hook Calls      │                    |
-    | on Event        |                    |
-    | with Responses  |                    |
-    └────────┬────────┘                    |
-             │                             |
-             ▼                             |
-    ┌─────────────────┐    Yes    ┌────────┴────────┐
-    │ New Interrupts  │ ────────► │ Store State     │
-    │ Raised?         │           │                 │
-    └────────┬────────┘           └─────────────────┘
-             │ No
-             ▼
-    ┌─────────────────┐
-    │ Continue        │
-    │ Execution       │
-    └─────────────────┘
+    ```mermaid
+    flowchart TD
+        A[Invoke Agent] --> B[Execute Hook/Tool]
+        B --> C{Interrupts Raised?}
+        C -->|No| D[Continue Agent Loop]
+        C -->|Yes| E[Stop Agent Loop]
+        E --> F[Return Interrupts]
+        F --> G[Respond to Interrupts]
+        G --> H[Execute Hook/Tool with Responses]
+        H --> I{New Interrupts?}
+        I -->|Yes| E
+        I -->|No| D
+    ```
 
 Example:
-    ```
+    ```Python
     from typing import Any
 
     from strands import Agent, tool
@@ -99,7 +61,6 @@ Example:
     ```
 
 Details:
-
     - User raises interrupt on their hook event by calling `event.interrupt()`.
     - User can raise one interrupt per hook callback.
     - Interrupts stop the agent event loop.
@@ -110,18 +71,13 @@ Details:
     - Interrupts are session managed in-between return and user response.
 """
 
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict
 
 from ..interrupt import Interrupt, InterruptException
-
-if TYPE_CHECKING:
-    from ..agent import Agent
 
 
 class _Interruptible(Protocol):
     """Interface that adds interrupt support to hook events and tools."""
-
-    agent: "Agent"
 
     def interrupt(self, name: str, reason: Any = None, response: Any = None) -> Any:
         """Trigger the interrupt with a reason.
@@ -136,12 +92,20 @@ class _Interruptible(Protocol):
 
         Raises:
             InterruptException: If human input is required.
+            RuntimeError: If agent instance attribute not set.
         """
+        for attr_name in ["agent", "source"]:
+            if hasattr(self, attr_name):
+                agent = getattr(self, attr_name)
+                break
+        else:
+            raise RuntimeError("agent instance attribute not set")
+
         id = self._interrupt_id(name)
-        state = self.agent._interrupt_state
+        state = agent._interrupt_state
 
         interrupt_ = state.interrupts.setdefault(id, Interrupt(id, name, reason, response))
-        if interrupt_.response:
+        if interrupt_.response is not None:
             return interrupt_.response
 
         raise InterruptException(interrupt_)

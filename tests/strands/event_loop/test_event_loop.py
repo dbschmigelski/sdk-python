@@ -1,12 +1,12 @@
 import concurrent
 import unittest.mock
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import ANY, AsyncMock, MagicMock, call, patch
 
 import pytest
 
 import strands
 import strands.telemetry
-from strands.agent.interrupt import InterruptState
+from strands import Agent
 from strands.hooks import (
     AfterModelCallEvent,
     BeforeModelCallEvent,
@@ -14,10 +14,11 @@ from strands.hooks import (
     HookRegistry,
     MessageAddedEvent,
 )
-from strands.interrupt import Interrupt
+from strands.interrupt import Interrupt, _InterruptState
 from strands.telemetry.metrics import EventLoopMetrics
 from strands.tools.executors import SequentialToolExecutor
 from strands.tools.registry import ToolRegistry
+from strands.types._events import EventLoopStopEvent
 from strands.types.exceptions import (
     ContextWindowOverflowException,
     EventLoopException,
@@ -25,6 +26,7 @@ from strands.types.exceptions import (
     ModelThrottledException,
 )
 from tests.fixtures.mock_hook_provider import MockHookProvider
+from tests.fixtures.mocked_model_provider import MockedModelProvider
 
 
 @pytest.fixture
@@ -132,6 +134,7 @@ def tool_executor():
 @pytest.fixture
 def agent(model, system_prompt, messages, tool_registry, thread_pool, hook_registry, tool_executor):
     mock = unittest.mock.Mock(name="agent")
+    mock.__class__ = Agent
     mock.config.cache_points = []
     mock.model = model
     mock.system_prompt = system_prompt
@@ -139,9 +142,11 @@ def agent(model, system_prompt, messages, tool_registry, thread_pool, hook_regis
     mock.tool_registry = tool_registry
     mock.thread_pool = thread_pool
     mock.event_loop_metrics = EventLoopMetrics()
+    mock.event_loop_metrics.reset_usage_metrics()
     mock.hooks = hook_registry
     mock.tool_executor = tool_executor
-    mock._interrupt_state = InterruptState()
+    mock._interrupt_state = _InterruptState()
+    mock.trace_attributes = {}
 
     return mock
 
@@ -377,6 +382,7 @@ async def test_event_loop_cycle_tool_result(
         tool_registry.get_all_tool_specs(),
         "p1",
         tool_choice=None,
+        system_prompt_content=unittest.mock.ANY,
     )
 
 
@@ -736,7 +742,10 @@ async def test_event_loop_cycle_with_parent_span(
 
     # Verify parent_span was used when creating cycle span
     mock_tracer.start_event_loop_cycle_span.assert_called_once_with(
-        invocation_state=unittest.mock.ANY, parent_span=parent_span, messages=messages
+        invocation_state=unittest.mock.ANY,
+        parent_span=parent_span,
+        messages=messages,
+        custom_trace_attributes=unittest.mock.ANY,
     )
 
 
@@ -744,7 +753,10 @@ async def test_event_loop_cycle_with_parent_span(
 async def test_request_state_initialization(alist):
     # Create a mock agent
     mock_agent = MagicMock()
+    # not setting this to False results in endless recursion
+    mock_agent._interrupt_state.activated = False
     mock_agent.event_loop_metrics.start_cycle.return_value = (0, MagicMock())
+    mock_agent.hooks.invoke_callbacks_async = AsyncMock()
 
     # Call without providing request_state
     stream = strands.event_loop.event_loop.event_loop_cycle(
@@ -959,8 +971,9 @@ async def test_event_loop_cycle_interrupt_resume(agent, model, tool, tool_times_
         },
     ]
 
-    agent._interrupt_state.activate(context={"tool_use_message": tool_use_message, "tool_results": tool_results})
+    agent._interrupt_state.context = {"tool_use_message": tool_use_message, "tool_results": tool_results}
     agent._interrupt_state.interrupts[interrupt.id] = interrupt
+    agent._interrupt_state.activate()
 
     interrupt_response = {}
 
@@ -1011,3 +1024,52 @@ async def test_event_loop_cycle_interrupt_resume(agent, model, tool, tool_times_
         "interrupts": {},
     }
     assert tru_state == exp_state
+
+
+@pytest.mark.asyncio
+async def test_invalid_tool_names_adds_tool_uses(agent, model, alist):
+    model.stream = MockedModelProvider(
+        [
+            {
+                "role": "assistant",
+                "content": [
+                    {
+                        "toolUse": {
+                            "toolUseId": "tool_use_id",
+                            "name": "invalid tool",
+                            "input": "{}",
+                        }
+                    }
+                ],
+            },
+            {"role": "assistant", "content": [{"text": "I invoked a tool!"}]},
+        ]
+    ).stream
+
+    stream = strands.event_loop.event_loop.event_loop_cycle(
+        agent=agent,
+        invocation_state={},
+    )
+    events = await alist(stream)
+
+    # ensure that we got end_turn and not tool_use
+    assert events[-1] == EventLoopStopEvent(
+        stop_reason="end_turn",
+        message={"content": [{"text": "I invoked a tool!"}], "role": "assistant"},
+        metrics=ANY,
+        request_state={},
+    )
+
+    # Ensure that an "invalid tool name" message was added properly
+    assert agent.messages[-2] == {
+        "content": [
+            {
+                "toolResult": {
+                    "content": [{"text": "Error: tool_name=<invalid tool> | invalid tool name pattern"}],
+                    "status": "error",
+                    "toolUseId": "tool_use_id",
+                }
+            }
+        ],
+        "role": "user",
+    }
