@@ -6,7 +6,7 @@ import pytest
 
 from strands.agent import Agent, AgentResult
 from strands.agent.state import AgentState
-from strands.experimental.hooks.multiagent import BeforeNodeCallEvent
+from strands.hooks import BeforeNodeCallEvent
 from strands.hooks.registry import HookRegistry
 from strands.interrupt import Interrupt, _InterruptState
 from strands.multiagent.base import Status
@@ -1243,6 +1243,8 @@ def test_swarm_interrupt_on_before_node_call_event(interrupt_hook):
 
     multiagent_result = swarm("Test task")
 
+    first_execution_time = multiagent_result.execution_time
+
     tru_status = multiagent_result.status
     exp_status = Status.INTERRUPTED
     assert tru_status == exp_status
@@ -1278,6 +1280,8 @@ def test_swarm_interrupt_on_before_node_call_event(interrupt_hook):
     tru_message = agent_result.result.message["content"][0]["text"]
     exp_message = "Task completed"
     assert tru_message == exp_message
+
+    assert multiagent_result.execution_time >= first_execution_time
 
 
 def test_swarm_interrupt_on_agent(agenerator):

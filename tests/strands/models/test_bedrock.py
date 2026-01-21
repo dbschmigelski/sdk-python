@@ -201,10 +201,11 @@ def test__init__region_precedence(mock_client_method, session_cls):
 def test__init__with_endpoint_url(mock_client_method):
     """Test that BedrockModel uses the provided endpoint_url for VPC endpoints."""
     custom_endpoint = "https://vpce-12345-abcde.bedrock-runtime.us-west-2.vpce.amazonaws.com"
-    BedrockModel(endpoint_url=custom_endpoint)
-    mock_client_method.assert_called_with(
-        region_name=DEFAULT_BEDROCK_REGION, config=ANY, service_name=ANY, endpoint_url=custom_endpoint
-    )
+    with unittest.mock.patch.object(os, "environ", {}):
+        BedrockModel(endpoint_url=custom_endpoint)
+        mock_client_method.assert_called_with(
+            region_name=DEFAULT_BEDROCK_REGION, config=ANY, service_name=ANY, endpoint_url=custom_endpoint
+        )
 
 
 def test__init__with_region_and_session_raises_value_error():
@@ -2196,3 +2197,47 @@ async def test_citations_content_preserves_tagged_union_structure(bedrock_client
         "(documentChar, documentPage, documentChunk, searchResultLocation, or web) "
         "with the location fields nested inside."
     )
+
+
+@pytest.mark.asyncio
+async def test_format_request_with_guardrail_latest_message(model):
+    """Test that guardrail_latest_message wraps the latest user message with text and image."""
+    model.update_config(
+        guardrail_id="test-guardrail",
+        guardrail_version="DRAFT",
+        guardrail_latest_message=True,
+    )
+
+    messages = [
+        {"role": "user", "content": [{"text": "First message"}]},
+        {"role": "assistant", "content": [{"text": "First response"}]},
+        {
+            "role": "user",
+            "content": [
+                {"text": "Look at this image"},
+                {"image": {"format": "png", "source": {"bytes": b"fake_image_data"}}},
+            ],
+        },
+    ]
+
+    request = model._format_request(messages)
+    formatted_messages = request["messages"]
+
+    # All messages should be in the request
+    assert len(formatted_messages) == 3
+
+    # First user message should NOT be wrapped
+    assert "text" in formatted_messages[0]["content"][0]
+    assert formatted_messages[0]["content"][0]["text"] == "First message"
+
+    # Assistant message should NOT be wrapped
+    assert "text" in formatted_messages[1]["content"][0]
+    assert formatted_messages[1]["content"][0]["text"] == "First response"
+
+    # Latest user message text should be wrapped
+    assert "guardContent" in formatted_messages[2]["content"][0]
+    assert formatted_messages[2]["content"][0]["guardContent"]["text"]["text"] == "Look at this image"
+
+    # Latest user message image should also be wrapped
+    assert "guardContent" in formatted_messages[2]["content"][1]
+    assert formatted_messages[2]["content"][1]["guardContent"]["image"]["format"] == "png"
