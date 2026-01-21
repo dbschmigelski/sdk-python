@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from .. import _identifier
 from .._async import run_async
 from ..event_loop._retry import ModelRetryStrategy
+from ..event_loop._tool_and_model_retry import ToolAndModelRetryStrategy
 from ..event_loop.event_loop import INITIAL_DELAY, MAX_ATTEMPTS, MAX_DELAY, event_loop_cycle
 from ..tools._tool_helpers import generate_missing_tool_result_content
 
@@ -119,7 +120,7 @@ class Agent:
         hooks: list[HookProvider] | None = None,
         session_manager: SessionManager | None = None,
         tool_executor: ToolExecutor | None = None,
-        retry_strategy: ModelRetryStrategy | None = None,
+        retry_strategy: ModelRetryStrategy | ToolAndModelRetryStrategy | None = None,
     ):
         """Initialize the Agent with the specified configuration.
 
@@ -169,9 +170,11 @@ class Agent:
             session_manager: Manager for handling agent sessions including conversation history and state.
                 If provided, enables session-based persistence and state management.
             tool_executor: Definition of tool execution strategy (e.g., sequential, concurrent, etc.).
-            retry_strategy: Strategy for retrying model calls on throttling or other transient errors.
-                Defaults to ModelRetryStrategy with max_attempts=6, initial_delay=4s, max_delay=240s.
-                Implement a custom HookProvider for custom retry logic, or pass None to disable retries.
+            retry_strategy: Strategy for retrying model and/or tool calls on failures.
+                Accepts ModelRetryStrategy (model retries only) or ToolAndModelRetryStrategy
+                (both model and tool retries). Defaults to ModelRetryStrategy with
+                max_attempts=6, initial_delay=4s, max_delay=240s. Use ToolAndModelRetryStrategy
+                with tool_max_attempts > 0 to enable tool retries. Pass None to disable all retries.
 
         Raises:
             ValueError: If agent id contains path separators.
@@ -249,10 +252,12 @@ class Agent:
         # separate event loops in different threads, so asyncio.Lock wouldn't work
         self._invocation_lock = threading.Lock()
 
-        # In the future, we'll have a RetryStrategy base class but until
-        # that API is determined we only allow ModelRetryStrategy
-        if retry_strategy and type(retry_strategy) is not ModelRetryStrategy:
-            raise ValueError("retry_strategy must be an instance of ModelRetryStrategy")
+        # Validate retry_strategy type - allow ModelRetryStrategy or ToolAndModelRetryStrategy
+        if retry_strategy is not None:
+            if type(retry_strategy) not in (ModelRetryStrategy, ToolAndModelRetryStrategy):
+                raise ValueError(
+                    "retry_strategy must be an instance of ModelRetryStrategy or ToolAndModelRetryStrategy"
+                )
 
         self._retry_strategy = (
             retry_strategy

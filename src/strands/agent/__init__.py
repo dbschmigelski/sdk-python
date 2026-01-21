@@ -8,6 +8,7 @@ It includes:
 """
 
 from ..event_loop._retry import ModelRetryStrategy
+from ..event_loop._tool_and_model_retry import ToolAndModelRetryStrategy
 from .agent import Agent
 from .agent_result import AgentResult
 from .base import AgentBase
@@ -27,4 +28,5 @@ __all__ = [
     "SlidingWindowConversationManager",
     "SummarizingConversationManager",
     "ModelRetryStrategy",
+    "ToolAndModelRetryStrategy",
 ]
